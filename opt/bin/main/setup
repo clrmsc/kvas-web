@@ -21,7 +21,7 @@ setup_test_provider_dns(){
 	is_dns_override && {
 		echo "Подключаем DNS провайдера..."
 		echo "В случае, выхода из сессии, зайдите снова по ssh и выполните команду 'kvas setup'"
-		post_api_query '[{"opkg": {"no dns-override": true}},{"system": {"configuration": {"save": true}}}]' &>/dev/null && when_ok || when_err
+		post_api_query "" '[{"opkg": {"dns-override": false}},{"system": {"configuration": {"save": true}}}]' &>/dev/null && when_ok || when_err
 	} 
 	# if ! is_dns_override ; then
 	# 	cli="$(get_router_host)/a"
@@ -41,11 +41,18 @@ setup_test_provider_dns(){
 setup_print_welcome(){
 
 	[ -n "${APP_RELEASE}" ] && full_version="${APP_VERSION} ${APP_RELEASE}" || full_version="${APP_VERSION}"
-	welcome="Установка пакета ${GREEN}КВАС${NOCL} версии ${GREEN}${full_version}${NOCL}"
-	echo -e "${welcome}"
+	print_line
+	echo -e "  ${GREEN}Утилита КВАС${NOCL}"
+	print_line
+	echo -e "  Пакет представляет собой обвязку или интерфейс командной строки"
+	echo -e "  для защиты Вашего соединения при обращении к определенным доменам."
+	echo -e "  Поддержка: ${GREEN}VLESS${NOCL}, ${GREEN}Hysteria 2${NOCL}, ${GREEN}Shadowsocks${NOCL}, OpenVPN, Wireguard, IKE"
+	echo -e "  Автопереключение: failover между ${GREEN}VLESS${NOCL} и ${GREEN}Hysteria${NOCL}"
+	print_line
+	echo -e "  Версия: ${GREEN}${full_version}${NOCL}"
 	print_line
 
-	log_in_file "${welcome}"
+	log_in_file "Установка пакета КВАС версии ${full_version}"
 	log_in_file line
 	log_in_file "Начало установки: $(date "${DATE_FORMAT}")"
 	log_in_file line
@@ -97,7 +104,8 @@ restore_backup(){
 #		warning "Обнаружен архивный файл ${description}..."
 		log_in_file "Файл ${description} ВОССТАНОВЛЕН из архива."
 		ready "Файл ${description} ${BLUE}восстановлен${NOCL}"
-		if mv -f "${backup_file}" "${dest_file}" ; then
+		mkdir -p "$(dirname "${dest_file}")"
+		if cp -f "${backup_file}" "${dest_file}" ; then
 			when_ok "УСПЕШНО"
 		else
 			when_bad "ОШИБКА"
@@ -114,6 +122,7 @@ restore_backup(){
 		if [ -f "${kvas_config_path}/${file_name}" ]; then
 #			warning "Архивный файл ${description} не обнаружен."
 			ready "Копируем файл ${description} по умолчанию"
+			mkdir -p "$(dirname "${dest_file}")"
 			if cp -f "${kvas_config_path}/${file_name}" "${dest_file}" &>/dev/null ; then
 				log_in_file "УСТАНОВЛЕН файл ${description} ПО УМОЛЧАНИЮ."
 				when_ok "УСПЕШНО"
@@ -271,6 +280,7 @@ stop_crypt(){
 restore_backups(){
 	restore_backup "${KVAS_LIST_FILE_BACKUP}" "${KVAS_LIST_FILE}" "защищенного списка"
 	restore_backup "${KVAS_CONFIG_BACKUP}" "${KVAS_CONF_FILE}" "конфигурации пакета Квас"
+	restore_backup "${TAGS_LIST_BACKUP}" "${TAGS_LIST_FILE}" "списка заквасок"
 
 	restore_backup "${ADGUARDHOME_CONFIG_BACKUP}" "${ADGUARDHOME_CONFIG}" "конфигурации AdGuardHome"
 	restore_backup "${ADGUARD_IPSET_FILE_BACKUP}" "${ADGUARD_IPSET_FILE}" "списка ipset для AdGuardHome"
@@ -286,16 +296,37 @@ restore_backups(){
 	restore_backup "${ADBLOCK_LIST_EXCEPTION_BACKUP}" "${ADBLOCK_LIST_EXCEPTION}" "списка хостов-исключений для блокировки рекламы"
 	restore_backup "${ADBLOCK_HOSTS_FILE_BACKUP}" "${ADBLOCK_HOSTS_FILE}" "списка хостов для блокировки рекламы"
 	restore_backup "${ADBLOCK_SOURCES_LIST_BACKUP}" "${ADBLOCK_SOURCES_LIST}" "списка источников хостов для блокировки рекламы"
-#	restore_backup "${}" "${}" ""
+	restore_backup "${HYSTERIA_CONFIG_BACKUP}" "${HYSTERIA_CONFIG}" "конфигурации hysteria"
+	restore_backup "${HYSTERIA_ENV_BACKUP}" "${HYSTERIA_ENV_FILE}" "файла окружения hysteria"
+	[ -f "${KVAS_BACKUP_PATH}/hysteria_bin" ] && {
+		mkdir -p /opt/apps/kvas/hysteria/bin
+		cp -f "${KVAS_BACKUP_PATH}/hysteria_bin" /opt/apps/kvas/hysteria/bin/hysteria
+		chmod 755 /opt/apps/kvas/hysteria/bin/hysteria
+		ready "Бинарник Hysteria ${BLUE}восстановлен${NOCL}"
+		when_ok "УСПЕШНО"
+	}
+	restore_backup "${KVAS_WEB_PASS_BACKUP}" "${KVAS_WEB_PASS}" "пароля веб-интерфейса"
 	print_line
 }
 
 
 # Сохраняем все значимые файлы конфигурации пакета Квас
 save_backups(){
+	# Создаем директорию для бэкапа
+	local backup_dir="${KVAS_BACKUP_PATH}"
+	mkdir -p "${backup_dir}"
+
+	# Бэкап основных конфигов
 	backup_copy "${KVAS_CONF_FILE}" "${KVAS_CONFIG_BACKUP}"
 	backup_copy "${KVAS_LIST_FILE}" "${KVAS_LIST_FILE_BACKUP}"
+	backup_copy "${TAGS_LIST_FILE}" "${TAGS_LIST_BACKUP}"
 
+	# Бэкап hysteria конфига (если есть)
+	backup_copy "${HYSTERIA_CONFIG}" "${HYSTERIA_CONFIG_BACKUP}"
+	backup_copy "${HYSTERIA_ENV_FILE}" "${HYSTERIA_ENV_BACKUP}"
+	backup_copy "${KVAS_WEB_PASS}" "${KVAS_WEB_PASS_BACKUP}"
+
+	# Бэкап остальных конфигов
 	backup_copy "${ADGUARDHOME_CONFIG}" "${ADGUARDHOME_CONFIG_BACKUP}"
 	backup_copy "${ADGUARD_IPSET_FILE}" "${ADGUARD_IPSET_FILE_BACKUP}"
 
@@ -304,15 +335,15 @@ save_backups(){
 	backup_copy "${DNSMASQ_CONFIG}" "${DNSMASQ_CONFIG_BACKUP}"
 	backup_copy "${DNSMASQ_IPSET_HOSTS}" "${DNSMASQ_IPSET_HOSTS_BACKUP}"
 
-	backup_copy "${VLESS_CONFIG_FILE}" "${VLESS_CONFIG_FILE_BACKUP}"
-
 	backup_copy "${DNSCRYPT_CONFIG}" "${DNSCRYPT_CONFIG_BACKUP}"
 
 	backup_copy "${ADBLOCK_HOSTS_FILE}" "${ADBLOCK_HOSTS_FILE_BACKUP}"
 	backup_copy "${ADBLOCK_SOURCES_LIST}" "${ADBLOCK_SOURCES_LIST_BACKUP}"
 	backup_copy "${ADBLOCK_LIST_EXCEPTION}" "${ADBLOCK_LIST_EXCEPTION_BACKUP}"
 
-#	backup_copy "${}" "${}"
+	[ -f /opt/apps/kvas/hysteria/bin/hysteria ] && cp -f /opt/apps/kvas/hysteria/bin/hysteria "${backup_dir}/hysteria_bin" 2>/dev/null
+
+	echo "Резервная копия сохранена в: ${backup_dir}"
 }
 
 list__backup() {
@@ -327,7 +358,7 @@ list__backup() {
 	fi
 	local source_file="${1}"
 
-	local backup_path="${HOME}/kvas"
+	local backup_path="/tmp/kvas-list-backup"
 	local backup_filename
 	backup_filename=$( date '+%y-%m-%d' )
 	backup_filename="list_${backup_filename}.txt"
@@ -368,17 +399,11 @@ rm_package_files() {
 
 	if [ "${full}" = full ] ; then
 		ready 'Удаляем архивные копии пакета Квас' && {
-			find /opt ! -path '/opt/packages/*' ! -path '/opt/lib/opkg/*' ! -path "${HOME}/*" \
-			  -name '*kvas*' ! -regex '.*/kvas[a-zA-Z].*' \
-			  -exec rm -rf {} +
-
 			rm_file /opt/etc/inface_equals
 			rm_file /opt/etc/kvas.conf
 			rm_file /opt/etc/kvas.list
-
+			rm_file /opt/etc/kvas.failover.conf
 			rm_dir /opt/etc/.kvas
-
-			# корректно ли так поступать вместо opkg remove?
 			rm_file /opt/etc/init.d/S22shadowsocks
 		} && when_ok || when_bad
 	fi
@@ -386,22 +411,23 @@ rm_package_files() {
 		rm_file /opt/etc/ndm/netfilter.d/100-dns-local
 		rm_file /opt/etc/ndm/netfilter.d/100-vpn-mark
 		rm_file /opt/etc/ndm/netfilter.d/100-proxy-redirect
-
 		rm_file /opt/etc/ndm/ifcreated.d/kvas-iface-add
 		rm_file /opt/etc/ndm/ifdestroyed.d/kvas-iface-del
 		rm_file /opt/etc/ndm/iflayerchanged.d/kvas-ips-reset
 		rm_file /opt/etc/ndm/iflayerchanged.d/100-kvas-vpn
 		rm_file /opt/etc/ndm/ifstatechanged.d/100-kvas-vpn
-
 		rm_file /opt/etc/ndm/fs.d/15-kvas-start.sh
 		rm_file /opt/etc/cron.5mins/check_vpn
-
 		rm_file /opt/etc/dnsmasq.d/kvas.dnsmasq
 		rm_dir /opt/etc/adblock
 		rm_dir /opt/tmp/adblock
-
+		rm_file /opt/etc/init.d/S97xray
 		rm_file /opt/bin/kvas
-		rm_dir /opt/apps/kvas
+		rm_dir /opt/etc/xray
+		rm_file /opt/var/log/kvas-failover.log
+		rm_file /var/run/kvas-failover.pid
+		rm_file /tmp/kvas-failover-switch.lock
+		rm_file /tmp/kvas-vpn-set.log
 	} && when_ok || when_bad
 }
 
@@ -442,8 +468,6 @@ rm_previous_version_files() {
 	rm_file /opt/etc/hosts.list
 	rm_dir /opt/etc/.backup
 
-	# бекапы
-	rm_dir /opt/etc/.kvas
 }
 
 clear_previous_version_net_rules() {
@@ -518,25 +542,35 @@ cmd_install(){
 
 	ready 'Удаляем файлы предыдущих версий'
 	rm_previous_version_files && when_ok || when_bad
+	if [ -f /tmp/kvas_tags_backup/tags.list ]; then
+		cp -f /tmp/kvas_tags_backup/tags.list /opt/etc/tags.list 2>/dev/null || true
+		rm -f /tmp/kvas_tags_backup/tags.list 2>/dev/null || true
+	fi
+	# При обновлении НЕ удаляем бэкапы конфигов (save_backups сделал их до opkg remove)
+	[ "${update_mode}" = "true" ] || rm_dir /opt/etc/.kvas
 
-	echo 'Очищаем сетевые правила предыдущих версий'
-	clear_previous_version_net_rules
+	[ "${update_mode}" ] || setup_print_welcome
+
+	ready 'Очищаем сетевые правила предыдущих версий'
+	clear_previous_version_net_rules && when_ok 'ГОТОВО' || when_bad 'ОШИБКА'
 
 	# стартуем ipset'ы, используемые DNS-серверами
 	# до старта самих DNS-серверов
 	ip4__ipset__create_list
 
 #	обновляем itpables
-	opkg update &> /dev/null
-	opkg list-installed | grep -q 'nano' && opkg remove nano &> /dev/null
-	opkg list-installed | grep -q 'dnsmasq-full' && opkg remove dnsmasq-full --force-depends &> /dev/null
-	opkg install dnsmasq-full --force-maintainer &>/dev/null
-	opkg install iptables nano-full &>/dev/null
+	ready 'Обновляем пакеты opkg'
+	{
+		opkg update >/dev/null 2>&1
+		opkg list-installed | grep -q 'nano' && opkg remove nano >/dev/null 2>&1
+		opkg list-installed | grep -q 'dnsmasq-full' && opkg remove dnsmasq-full --force-depends >/dev/null 2>&1
+		opkg install dnsmasq-full --force-maintainer >/dev/null 2>&1
+		opkg install iptables nano-full >/dev/null 2>&1
+	} && when_ok 'ГОТОВО' || when_bad 'ОШИБКА'
 
 	# Устанавливаем прокси пакет
 	cmd_install_proxy_package || return 1
 
-	[ "${update_mode}" ] || setup_print_welcome
 	mkdir -p "${KVAS_BACKUP_PATH}"
 	cat /dev/null > "${INSTALL_LOG}"
 
@@ -546,6 +580,7 @@ cmd_install(){
 	ln -sf "${home_dir}/etc/ndm/iflayerchanged.d/kvas-ips-reset" "/opt/etc/ndm/iflayerchanged.d/kvas-ips-reset"
 	ln -sf "${home_dir}/etc/ndm/ifcreated.d/kvas-iface-add" "/opt/etc/ndm/ifcreated.d/kvas-iface-add"
 	ln -sf "${home_dir}/etc/ndm/ifdestroyed.d/kvas-iface-del" "/opt/etc/ndm/ifdestroyed.d/kvas-iface-del"
+	ln -sf "${home_dir}/etc/ndm/netfilter.d/100-vpn-mark" "/opt/etc/ndm/netfilter.d/100-vpn-mark"
 
 	check_crypto_ssr_libs
 
@@ -553,7 +588,7 @@ cmd_install(){
 	chmod +x "${KVAS_START_FILE}"
 
 	# Если не установлен xray - устанавливаем его
-	has_xray_installed || opkg install xray &> /dev/null
+	has_xray_installed || opkg install xray >/dev/null 2>&1
 	# Создаем ссылку на наш скрипт для запуска xray в /opt/etc/init.d 
 	[ -f "${XRAY_INIT}" ] || ln -s /opt/apps/kvas/etc/init.d/S97xray ${XRAY_INIT}
 
@@ -585,6 +620,16 @@ cmd_install(){
 		#------------------------------------------------------
 		restore_backups
 
+		# Восстанавливаем конфиги из бэкапа полного удаления
+		if [ -d /opt/kvas_uninstall_backup ]; then
+			ready "Восстанавливаем из бэкапа полного удаления..."
+			mkdir -p "${KVAS_BACKUP_PATH}"
+			cp -rf /opt/kvas_uninstall_backup/* "${KVAS_BACKUP_PATH}/" 2>/dev/null
+			restore_backups
+			rm -rf /opt/kvas_uninstall_backup 2>/dev/null
+			when_ok
+		fi
+
 		set_config_value APP_VERSION "${new_ver}"
 		set_config_value APP_RELEASE "${new_rel}"
 		#------------------------------------------------------
@@ -601,7 +646,13 @@ cmd_install(){
 			cmd_interface_change no install
 		else
 #			Если изменений не было, то восстанавливаем соединение
+#			Не даём switch_vpn_on остановить/перезапускать xray
+			_XRAY_INIT_SAVE="$XRAY_INIT"
+			XRAY_INIT="/bin/true"
 			switch_vpn_on "${inface_entware}" "${cli_inface}"
+			XRAY_INIT="$_XRAY_INIT_SAVE"
+#			Убеждаемся что xray запущен (service_action игнорирует XRAY_INIT)
+			service_action S97xray start > /dev/null 2>&1
 		fi
 
 	else
@@ -634,8 +685,11 @@ cmd_install(){
 
 		#------------------------------------------------------
 		# DNSMASQ
+		# При обновлении не заменяем конфиг — dnsmasq уже работает
 		#------------------------------------------------------
-		dnsmasq_install 'install'
+		if [ "${update_mode}" != "true" ] || ! [ -f "${DNSMASQ_CONFIG}" ] || grep -q '@' "${DNSMASQ_CONFIG}" 2>/dev/null; then
+			dnsmasq_install 'install'
+		fi
 		#------------------------------------------------------
 		# DNSCRYPT-PROXY2
 		#------------------------------------------------------
@@ -670,23 +724,61 @@ cmd_install(){
 	#------------------------------------------------------
 	# 	Запускаем КВАС в работу
 	#------------------------------------------------------
-	ready "Запускаем КВАС в работу"
-	if cmd_kvas_init &> /dev/null ; then
+	if [ "${update_mode}" = "true" ]; then
+#		При обновлении switch_vpn_on уже поднял интерфейс и настроил iptables.
+#		Не делаем лишний reset_all_connection и update_iptables.
+		ready "Обновляем списки и перезапускаем службы..."
+		update_ipset "no"
+		update_adblock
+		all_services_restart
+		[ -x "/opt/etc/ndm/netfilter.d/100-vpn-mark" ] && {
+			type=iptables table=mangle /opt/etc/ndm/netfilter.d/100-vpn-mark 2>/dev/null
+		}
 		when_ok "УСПЕШНО"
 	else
-		when_bad "ОШИБКА"
-		ready "Пробуем перезапустить КВАС снова"
+		ready "Запускаем КВАС в работу"
 		if cmd_kvas_init &> /dev/null ; then
 			when_ok "УСПЕШНО"
 		else
 			when_bad "ОШИБКА"
-			mess="Проблема при запуске КВАСа"
-			log_in_file "ОШИБКА: ${mess}"
-			exit 1
+			ready "Пробуем перезапустить КВАС снова"
+			if cmd_kvas_init &> /dev/null ; then
+				when_ok "УСПЕШНО"
+			else
+				when_bad "ОШИБКА"
+				mess="Проблема при запуске КВАСа"
+				log_in_file "ОШИБКА: ${mess}"
+				exit 1
+			fi
 		fi
 	fi
 
 	set_config_value 'SETUP_FINISHED' 'true'
+
+	# Проверяем что значение записалось
+	if grep -q "SETUP_FINISHED=true" "${KVAS_CONF_FILE}" 2>/dev/null; then
+		echo "Настройка сохранена."
+	else
+		echo "SETUP_FINISHED=true" >> "${KVAS_CONF_FILE}"
+	fi
+
+	# Отложенная установка Hysteria (если выбрана в VPN selection)
+	if [ -f "${KVAS_CONF_FILE}" ] && grep -q "SETUP_HYSTERIA=pending" "${KVAS_CONF_FILE}" 2>/dev/null; then
+		sed -i 's/SETUP_HYSTERIA=pending/SETUP_HYSTERIA=done/' "${KVAS_CONF_FILE}"
+		echo ""
+		echo -e "${GREEN}Запускаем настройку Hysteria 2...${NOCL}"
+		print_line
+		cmd_hysteria_new
+	fi
+
+
+
+	# Принудительный перезапуск dnsmasq
+	[ -f /opt/etc/init.d/K56dnsmasq ] && [ ! -f /opt/etc/init.d/S56dnsmasq ] && cp -f /opt/etc/init.d/K56dnsmasq /opt/etc/init.d/S56dnsmasq
+	if [ -f /opt/etc/init.d/S56dnsmasq ] && [ -f /opt/etc/dnsmasq.conf ]; then
+		/opt/etc/init.d/S56dnsmasq restart >/dev/null 2>&1
+	fi
+
 	log_warning 'Установка пакета КВАС завершена'
 
 	print_line
@@ -748,14 +840,12 @@ all_services_rm_develop_mode() {
 		else
 			ready "Останавливаем службу dnsmasq "
 			{
-				/opt/etc/init.d/S56dnsmasq stop &> /dev/null 
 				rm_file /opt/etc/dnsmasq.conf
 				opkg remove dnsmasq --force-depends &> /dev/null
 			} && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
 
 			ready "Останавливаем службу dnscrypt-proxy2 "
 			{
-				/opt/etc/init.d/S09dnscrypt-proxy2 stop &> /dev/null 
 				rm_file /opt/etc/dnscrypt-proxy.toml
 				opkg remove dnscrypt-proxy2 --force-depends &> /dev/null
 			} && when_ok "УСПЕШНО" || when_bad "ОШИБКА"
@@ -784,8 +874,8 @@ cmd_uninstall() {
 	echo -e "Удаление пакета ${GREEN}КВАС™${NOCL} версии ${GREEN}${APP_VERSION}${rel}${NOCL}..."
 
 
-	if [ -n "${rm_type}" ] && [[ "${rm_type}" =~ "${answer_yes}" ]] \
-		|| [[ "${sure}" =~ "${answer_yes}" ]] ; then
+	if { [ -n "${rm_type}" ] && echo "${rm_type}" | grep -qE "${answer_yes}"; } \
+		|| echo "${sure}" | grep -qE "${answer_yes}" ; then
 		answer=y; sure=y
 	else
 		print_line
@@ -795,12 +885,15 @@ cmd_uninstall() {
 
 	if echo "${answer}" | grep -qi y ; then
 		if [ "${rm_type}" = full ]; then
+			save_backups
+			BKPDIR="/opt/kvas_uninstall_backup"
+			rm -rf "$BKPDIR" 2>/dev/null && mkdir -p "$BKPDIR"
+			[ -d /opt/etc/.kvas/backup ] && cp -rf /opt/etc/.kvas/backup/* "$BKPDIR/" 2>/dev/null
 			mess="Удаляем все архивные данные и все зависимые пакеты..."
-			rm -f /opt/etc/init/K56dnsmasq  /opt/etc/init/K09dnscrypt-proxy2
-		elif [ "${rm_type}" == develop ] ; then
+			rm -f /opt/etc/init.d/K56dnsmasq  /opt/etc/init.d/K09dnscrypt-proxy2
+		elif [ "${rm_type}" = develop ] ; then
 			all_services_rm_develop_mode
 		else
-#			Сохраняем значимые файлы конфигурации
 			save_backups
 			mess="Удаляем все архивные данные, зависимые пакеты оставляем."
 		fi
@@ -809,71 +902,80 @@ cmd_uninstall() {
 
 		list__backup
 
-		if has_ssr_enable ; then
-			ready 'Останавливаем службу Shadowsocks '
-			/opt/etc/init.d/S22shadowsocks stop &>/dev/null && when_ok 'УСПЕШНО' || when_bad 'ОШИБКА'
-			config__restore_from_opkg "${SHADOWSOCKS_CONF}"
+		# 1. Останавливаем все сервисы
+		ready 'Останавливаем все сервисы'
+		{
+			[ -f /opt/etc/init.d/S99hysteria ] && /opt/etc/init.d/S99hysteria stop 2>/dev/null
+			[ -f /opt/etc/init.d/S97xray ] && /opt/etc/init.d/S97xray stop 2>/dev/null
+			[ -f /opt/etc/init.d/S99adguardhome ] && /opt/etc/init.d/S99adguardhome stop 2>/dev/null
+			[ -f /opt/etc/init.d/S22shadowsocks ] && /opt/etc/init.d/S22shadowsocks stop 2>/dev/null
+		} 2>/dev/null
+		when_ok 'УСПЕШНО' || when_bad 'ОШИБКА'
+
+		# 2. Удаляем Keenetic интерфейсы через API
+		# 2. Только при full uninstall удаляем интерфейсы и чистим iptables
+		if [ "${rm_type}" = "full" ]; then
+			rm -f /opt/etc/init.d/K56dnsmasq /opt/etc/init.d/K09dnscrypt-proxy2
+			ready 'Удаляем Keenetic proxy интерфейсы'
+			{
+				curl --connect-timeout 3 --max-time 10 -s -d '[{"interface": {"name": "Proxy21", "no": true}}]' localhost:79/rci/ >/dev/null 2>&1
+				curl --connect-timeout 3 --max-time 10 -s -d '[{"interface": {"name": "Proxy41", "no": true}}]' localhost:79/rci/ >/dev/null 2>&1
+				curl --connect-timeout 3 --max-time 10 -s -d '[{"system": {"configuration": {"save": true}}}]' localhost:79/rci/ >/dev/null 2>&1
+			} && when_ok 'ГОТОВО' || when_bad 'ОШИБКА'
+			ready 'Очищаем сетевые правила iptables'
+			{
+				clear_previous_version_net_rules 2>/dev/null
+				ip4__flush 2>/dev/null
+			} && when_ok 'ГОТОВО' || when_bad 'ОШИБКА'
 		fi
-		if cmd_adguardhome_status | grep -q 'ВКЛЮЧЕН' ; then
-			ready 'Останавливаем службу AdGuardHome '
-			${ADGUARDHOME_DEMON} stop &>/dev/null && when_ok 'УСПЕШНО' || when_bad 'ОШИБКА'
-			config__restore_from_opkg "${ADGUARDHOME_CONFIG}"
-		else
-			ready 'Останавливаем службу DNSMasq '
-			${DNSMASQ_DEMON} stop &>/dev/null && when_ok 'УСПЕШНО' || when_bad 'ОШИБКА'
-			config__restore_from_opkg "${DNSMASQ_CONFIG}"
 
-			ready 'Останавливаем службу DNSCrypt '
-			${DNSCRYPT_DEMON} stop &>/dev/null && when_ok 'УСПЕШНО' || when_bad 'ОШИБКА'
-			config__restore_from_opkg "${DNSCRYPT_CONFIG}"
-		fi
+		# 4. Восстанавливаем DNS
+		ready 'Восстанавливаем DNS'
+		{
+			config__restore_from_opkg "${DNSMASQ_CONFIG}" 2>/dev/null
+			config__restore_from_opkg "${SHADOWSOCKS_CONF}" 2>/dev/null
+			[ -f /opt/etc/init.d/S56dnsmasq ] && [ -f /opt/etc/dnsmasq.conf ] && /opt/etc/init.d/S56dnsmasq restart >/dev/null 2>&1
+		} 2>/dev/null
+		when_ok 'УСПЕШНО' || when_bad 'ОШИБКА'
+		# Включаем системный DNS провайдера
+		ready 'Включаем системный DNS провайдера'
+		post_api_query "" '[{"opkg": {"dns-override": false}},{"system": {"configuration": {"save": true}}}]' &>/dev/null
+		when_ok 'УСПЕШНО' || when_bad 'ОШИБКА'
 
-		# Подключаем библиотеку keen_api
-		#source /opt/apps/kvas/bin/libs/keen_api
-		# Удаляем DNS сервера, установленне для Кваса
-		#del_dns_router_server_ip $(get_router_ip) ${MAIN_DNS_PORT}
-		# Устанавливаем DNS роутера и порт по умолчанию
-		#set_dns_router_server_ip "77.88.8.8" "53"
+		# 5. Удаляем интегрированные файлы
+		rm_package_files "${rm_type}" 2>/dev/null
 
-		# Удаляем правила в брандмауэре, установленные при инсталяции Кваса
-		# del_firewall_rules 53 tcp "deny"
-		# del_firewall_rules 53 udp "deny"
-
-		# Удаляем правила в брандмауэре, установленные при инсталяции Кваса
-		# local _local_net="$(get_router_ip | cut -d'.' -f1-3).0"
-		# del_firewall_rules 53 tcp "permit" "${_local_net}"
-		# del_firewall_rules 53 udp "permit" "${_local_net}"
-
-		# Сохраняем конфигурацию
-		#save_system_configuration_by_api
-
-		#ready 'Очищаем используемые сетевые правила...'
-		# Нормально отработает, пока все файлы на месте.
-		# Ведь внутри может проверять тип текущего тоннеля и прочее.
-		#ip4__flush &> /dev/null
-		#if [ $? = 0 ]; then when_ok 'УСПЕШНО'; else when_bad 'ОШИБКА'; fi
-
+		# 6. Удаляем пакет КВАС
 		ready 'Удаляем пакет Квас...'
-		opkg remove kvas --autoremove &> /dev/null 
+		opkg --force-remove --force-depends remove kvas >/dev/null 2>&1
 		when_ok 'УСПЕШНО'
 
-		ready 'Удаляем интегрированные в систему файлы...'
-		rm_package_files "${rm_type}" &> /dev/null && when_ok 'УСПЕШНО' || when_bad 'ОШИБКА'
-
-		ready 'Очищаем всевозможные сетевые правила...'
-		# т.к. файлы уже подчищены, то можем использовать лишь не "интеллектуальную" очистку
-		clear_previous_version_net_rules &> /dev/null
-		if [ $? = 0 ]; then when_ok 'УСПЕШНО'; else when_bad 'ОШИБКА'; fi
-
-		if [ -f /opt/etc/init.d/S99adguardhome ]; then
-			restore_adguard
+		# 7. Полное удаление hysteria
+		if [ "${rm_type}" = full ]; then
+			ready 'Удаляем Hysteria...'
+			[ -f /opt/etc/init.d/S99hysteria ] && /opt/etc/init.d/S99hysteria stop 2>/dev/null
+			rm -f /opt/bin/hysteria /opt/etc/init.d/S99hysteria /var/run/hysteria.pid 2>/dev/null
+			rm -rf /opt/apps/kvas/hysteria 2>/dev/null
+			when_ok 'УСПЕШНО' || when_bad 'ОШИБКА'
 		fi
 
-		if [ -f /opt/etc/init.d/S56dnsmasq ] ; then
-			stop_dnsmasq
-		fi
-		if [ -f /opt/etc/init.d/S09dnscrypt-proxy2 ]; then
-			stop_crypt
+		# 8. При полном удалении — удаляем пакеты
+		if [ "${rm_type}" = full ]; then
+			ready 'Удаляем остаточные conffiles зависимых пакетов'
+			rm -f /opt/etc/shadowsocks.json /opt/etc/shadowsocks.json-opkg \
+			      /opt/etc/dnscrypt-proxy.toml /opt/etc/dnscrypt-proxy.toml-opkg 2>/dev/null
+			when_ok 'ГОТОВО'
+			ready 'Удаляем пакеты, установленные KVAS...'
+			{
+				opkg --force-remove --force-depends remove xray >/dev/null 2>&1
+				opkg --force-remove --force-depends remove shadowsocks-libev-ss-redir >/dev/null 2>&1
+				opkg --force-remove --force-depends remove shadowsocks-libev-config >/dev/null 2>&1
+				opkg --force-remove --force-depends remove dnscrypt-proxy2 >/dev/null 2>&1
+				opkg --force-remove --force-depends remove nano-full >/dev/null 2>&1
+				opkg --force-remove --force-depends remove socat >/dev/null 2>&1
+				opkg --force-remove --force-depends remove conntrack >/dev/null 2>&1
+			} >/dev/null 2>&1
+			when_ok 'УСПЕШНО' || when_bad 'ЧАСТИЧНО'
 		fi
 
 		print_line
