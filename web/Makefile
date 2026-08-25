@@ -17,7 +17,12 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 #   aarch64          — Keenetic на ARM64
 #   armv7            — старые ARM-модели
 
-.PHONY: all test lint clean host
+# Цели бинарников объявлены .PHONY намеренно: у них нет списка зависимостей,
+# и без этого make считал бы уже существующий файл актуальным и не пересобирал
+# его после правок в исходниках. Go кеширует сборку сам, так что это дёшево.
+.PHONY: all test lint clean host \
+	$(OUT)/$(BINARY)-mipsle $(OUT)/$(BINARY)-mips \
+	$(OUT)/$(BINARY)-aarch64 $(OUT)/$(BINARY)-armv7
 
 all: test $(OUT)/$(BINARY)-mipsle $(OUT)/$(BINARY)-mips $(OUT)/$(BINARY)-aarch64 $(OUT)/$(BINARY)-armv7
 
