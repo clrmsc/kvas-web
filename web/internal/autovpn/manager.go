@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -41,6 +42,25 @@ func New(cfg config.Config, log *slog.Logger) (*Manager, error) {
 		st = DefaultState()
 	}
 	return &Manager{cfg: cfg, log: log, state: st}, nil
+}
+
+// xrayBin возвращает путь к xray: заданный флагом или найденный среди
+// обычных мест установки.
+func (m *Manager) xrayBin() string {
+	if m.cfg.XrayBin != "" {
+		return m.cfg.XrayBin
+	}
+	return kvas.FindFile(kvas.XrayBinCandidates...)
+}
+
+// xrayInit возвращает init-скрипт xray. Квас держит его у себя и при
+// настройке делает ссылку /opt/etc/init.d/S24xray, поэтому путь зависит
+// от того, выполнялся ли уже kvas setup.
+func (m *Manager) xrayInit() string {
+	if m.cfg.XrayInit != "" {
+		return m.cfg.XrayInit
+	}
+	return kvas.FindFile(kvas.XrayInitCandidates...)
 }
 
 // State возвращает копию текущего состояния.
@@ -182,7 +202,7 @@ func (m *Manager) runCheck(ctx context.Context, onResult func(probe.Result)) ([]
 
 	st := m.State()
 	opt := probe.DefaultOptions()
-	opt.XrayBin = m.cfg.XrayBin
+	opt.XrayBin = m.xrayBin()
 	opt.SpeedTestURL = m.cfg.SpeedTestURL
 	opt.SpeedTopN = st.SpeedTopN
 
@@ -299,13 +319,14 @@ func (m *Manager) testConfig(ctx context.Context, cfgData []byte) error {
 	}
 	tmp.Close()
 
-	if _, err := os.Stat(m.cfg.XrayBin); err != nil {
-		// xray не установлен — проверять нечем, но и подменять нечего.
-		return fmt.Errorf("xray не найден по пути %s", m.cfg.XrayBin)
+	bin := m.xrayBin()
+	if bin == "" {
+		return fmt.Errorf("xray не найден. Искали: %s.\nУстановите его: opkg install xray",
+			strings.Join(kvas.XrayBinCandidates, ", "))
 	}
 	testCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(testCtx, m.cfg.XrayBin, "run", "-test", "-c", tmp.Name()).CombinedOutput()
+	out, err := exec.CommandContext(testCtx, bin, "run", "-test", "-c", tmp.Name()).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("xray отверг конфигурацию: %s", kvas.StripANSI(string(out)))
 	}
@@ -348,12 +369,15 @@ func (m *Manager) rollback(ctx context.Context, backup string, had bool) {
 }
 
 func (m *Manager) restartXray(ctx context.Context) error {
-	if _, err := os.Stat(m.cfg.XrayInit); err != nil {
-		return fmt.Errorf("не найден init-скрипт xray: %s", m.cfg.XrayInit)
+	init := m.xrayInit()
+	if init == "" {
+		return fmt.Errorf("не найден init-скрипт xray. Искали: %s.\n"+
+			"Обычно он появляется после первичной настройки: kvas setup",
+			strings.Join(kvas.XrayInitCandidates, ", "))
 	}
 	runCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(runCtx, m.cfg.XrayInit, "restart").CombinedOutput()
+	out, err := exec.CommandContext(runCtx, init, "restart").CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("xray не перезапустился: %s", kvas.StripANSI(string(out)))
 	}

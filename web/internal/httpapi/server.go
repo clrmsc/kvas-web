@@ -200,6 +200,16 @@ func (s *Server) staticHandler() http.Handler {
 	})
 }
 
+// tagsFile возвращает путь к файлу заквасок: в разных установках Кваса
+// он лежит либо в каталоге пакета, либо в /opt/etc.
+func (s *Server) tagsFile() string {
+	candidates := append([]string{s.cfg.TagsList}, kvas.TagsCandidates...)
+	if found := kvas.FindFile(candidates...); found != "" {
+		return found
+	}
+	return s.cfg.TagsList
+}
+
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")

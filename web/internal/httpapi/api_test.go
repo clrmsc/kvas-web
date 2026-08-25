@@ -342,3 +342,27 @@ func TestSetupAllowedFromLAN(t *testing.T) {
 		t.Error("пароль должен быть установлен")
 	}
 }
+
+func TestTagsFileFallsBackToPackagePath(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.Default()
+
+	// Путь из настроек существует — берём его.
+	existing := filepath.Join(dir, "tags.list")
+	if err := os.WriteFile(existing, []byte("[Видео]\nyoutube.com\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg.TagsList = existing
+	s := &Server{cfg: cfg}
+	if got := s.tagsFile(); got != existing {
+		t.Errorf("получено %q, ожидалось %q", got, existing)
+	}
+
+	// Путь не существует и запасных на этой машине нет — возвращается
+	// исходный, чтобы сообщение об ошибке указывало на понятный файл.
+	cfg.TagsList = filepath.Join(dir, "нет-файла")
+	s = &Server{cfg: cfg}
+	if got := s.tagsFile(); got != cfg.TagsList && got != "/opt/apps/kvas/etc/conf/tags.list" {
+		t.Errorf("неожиданный путь %q", got)
+	}
+}

@@ -15,7 +15,7 @@ type Config struct {
 	KvasBin      string // /opt/apps/kvas/bin/kvas
 	KvasConf     string // /opt/etc/kvas.conf
 	HostsList    string // /opt/etc/kvas.list
-	TagsList     string // /opt/etc/tags.list
+	TagsList     string // /opt/apps/kvas/etc/conf/tags.list
 	AdblockList  string // /opt/etc/adblock/block.list
 	DnsmasqConf  string // /opt/etc/dnsmasq.conf
 	FailoverConf string // /opt/etc/kvas.failover.conf
@@ -25,9 +25,11 @@ type Config struct {
 	TLSKey       string // опционально
 	RCIAddr      string // Keenetic RCI, обычно 127.0.0.1:79
 
-	XrayBin      string // /opt/sbin/xray
+	// Пустые XrayBin и XrayInit означают «искать самостоятельно»:
+	// расположение зависит от того, прошла ли настройка Кваса.
+	XrayBin      string
 	XrayConf     string // /opt/etc/xray/kvas.json — рабочий конфиг туннеля
-	XrayInit     string // /opt/etc/init.d/S97xray
+	XrayInit     string
 	ProxyPort    int    // локальный SOCKS-порт xray, который слушает Квас
 	SpeedTestURL string // откуда качать при замере скорости
 }
@@ -39,7 +41,7 @@ func Default() Config {
 		KvasBin:      "/opt/apps/kvas/bin/kvas",
 		KvasConf:     "/opt/etc/kvas.conf",
 		HostsList:    "/opt/etc/kvas.list",
-		TagsList:     "/opt/etc/tags.list",
+		TagsList:     "/opt/apps/kvas/etc/conf/tags.list",
 		AdblockList:  "/opt/etc/adblock/block.list",
 		DnsmasqConf:  "/opt/etc/dnsmasq.conf",
 		FailoverConf: "/opt/etc/kvas.failover.conf",
@@ -47,9 +49,9 @@ func Default() Config {
 		LogFile:      "/opt/var/log/kvas-web.log",
 		RCIAddr:      "127.0.0.1:79",
 
-		XrayBin:      "/opt/sbin/xray",
+		XrayBin:      "",
 		XrayConf:     "/opt/etc/xray/kvas.json",
-		XrayInit:     "/opt/etc/init.d/S97xray",
+		XrayInit:     "",
 		ProxyPort:    1097,
 		SpeedTestURL: "https://speed.cloudflare.com/__down?bytes=20000000",
 	}
@@ -74,9 +76,9 @@ func FromFlags(args []string) (Config, error) {
 	fs.StringVar(&c.TLSCert, "tls-cert", envOr("KVASWEB_TLS_CERT", ""), "сертификат TLS (включает HTTPS)")
 	fs.StringVar(&c.TLSKey, "tls-key", envOr("KVASWEB_TLS_KEY", ""), "ключ TLS")
 	fs.StringVar(&c.RCIAddr, "rci", envOr("KVASWEB_RCI", c.RCIAddr), "адрес Keenetic RCI")
-	fs.StringVar(&c.XrayBin, "xray-bin", envOr("KVASWEB_XRAY_BIN", c.XrayBin), "путь к xray")
+	fs.StringVar(&c.XrayBin, "xray-bin", envOr("KVASWEB_XRAY_BIN", c.XrayBin), "путь к xray (по умолчанию ищется автоматически)")
 	fs.StringVar(&c.XrayConf, "xray-conf", envOr("KVASWEB_XRAY_CONF", c.XrayConf), "путь к рабочему конфигу xray")
-	fs.StringVar(&c.XrayInit, "xray-init", envOr("KVASWEB_XRAY_INIT", c.XrayInit), "init-скрипт xray")
+	fs.StringVar(&c.XrayInit, "xray-init", envOr("KVASWEB_XRAY_INIT", c.XrayInit), "init-скрипт xray (по умолчанию ищется автоматически)")
 	fs.IntVar(&c.ProxyPort, "proxy-port", envIntOr("KVASWEB_PROXY_PORT", c.ProxyPort), "локальный SOCKS-порт xray")
 	fs.StringVar(&c.SpeedTestURL, "speedtest-url", envOr("KVASWEB_SPEEDTEST_URL", c.SpeedTestURL), "адрес файла для замера скорости")
 	if err := fs.Parse(args); err != nil {

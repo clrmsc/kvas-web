@@ -19,6 +19,7 @@ import (
 	"github.com/clrmsc/kvas-web/web/internal/autovpn"
 	"github.com/clrmsc/kvas-web/web/internal/config"
 	"github.com/clrmsc/kvas-web/web/internal/httpapi"
+	"github.com/clrmsc/kvas-web/web/internal/kvas"
 	"github.com/clrmsc/kvas-web/web/ui"
 )
 
@@ -75,6 +76,17 @@ func run(args []string) error {
 
 	// Суточная проверка серверов подписки живёт столько же, сколько сервис.
 	go av.RunScheduler(ctx)
+
+	// Пути к файлам Кваса различаются между установками, поэтому пишем
+	// в журнал то, что сервис нашёл: по этой строке видно, почему,
+	// например, список заквасок оказался пустым или не нашёлся xray.
+	logger.Info("файлы Кваса",
+		"cli", kvas.FindFile(cfg.KvasBin),
+		"конфиг", kvas.FindFile(cfg.KvasConf),
+		"домены", kvas.FindFile(cfg.HostsList),
+		"закваски", kvas.FindFile(append([]string{cfg.TagsList}, kvas.TagsCandidates...)...),
+		"xray", kvas.FindFile(append([]string{cfg.XrayBin}, kvas.XrayBinCandidates...)...),
+		"xray-init", kvas.FindFile(append([]string{cfg.XrayInit}, kvas.XrayInitCandidates...)...))
 
 	errCh := make(chan error, 1)
 	go func() {

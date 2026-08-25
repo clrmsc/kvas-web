@@ -42,7 +42,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.log.Warn("не прочитан список доменов", "err", err)
 	}
-	tags, err := kvas.ReadTags(s.cfg.TagsList)
+	tags, err := kvas.ReadTags(s.tagsFile())
 	if err != nil {
 		s.log.Warn("не прочитан список заквасок", "err", err)
 	}

@@ -24,7 +24,7 @@ type tagDomain struct {
 }
 
 func (s *Server) handleTagsList(w http.ResponseWriter, r *http.Request) {
-	tags, err := kvas.ReadTags(s.cfg.TagsList)
+	tags, err := kvas.ReadTags(s.tagsFile())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "не удалось прочитать закваски: "+err.Error())
 		return
@@ -74,7 +74,7 @@ func (s *Server) applyTag(w http.ResponseWriter, r *http.Request, enable bool) {
 		return
 	}
 
-	tags, err := kvas.ReadTags(s.cfg.TagsList)
+	tags, err := kvas.ReadTags(s.tagsFile())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
