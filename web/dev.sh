@@ -24,4 +24,7 @@ exec go run ./cmd/kvasweb \
 	-dnsmasq-conf "$SANDBOX/dnsmasq.conf" \
 	-failover-conf "$SANDBOX/failover.conf" \
 	-state-dir "$SANDBOX/state" \
-	-log-file "$SANDBOX/web.log"
+	-log-file "$SANDBOX/web.log" \
+	-xray-bin "$SANDBOX/fakexray" \
+	-xray-conf "$SANDBOX/xray.json" \
+	-xray-init "$SANDBOX/S97xray"

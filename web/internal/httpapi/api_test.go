@@ -14,6 +14,7 @@ import (
 	"testing/fstest"
 
 	"github.com/clrmsc/kvas-web/web/internal/auth"
+	"github.com/clrmsc/kvas-web/web/internal/autovpn"
 	"github.com/clrmsc/kvas-web/web/internal/config"
 )
 
@@ -66,8 +67,12 @@ func newTestServer(t *testing.T) (*httptest.Server, config.Config, string) {
 	}
 	static := fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("<html>ok</html>")}}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	av, err := autovpn.New(cfg, log)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	srv := httptest.NewServer(New(cfg, am, log, static).Handler())
+	srv := httptest.NewServer(New(cfg, am, av, log, static).Handler())
 	t.Cleanup(srv.Close)
 	return srv, cfg, calls
 }
@@ -285,7 +290,12 @@ func TestSetupRejectedFromInternet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := New(cfg, am, slog.New(slog.NewTextHandler(io.Discard, nil)),
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	av, err := autovpn.New(cfg, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(cfg, am, av, log,
 		fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("x")}}).Handler()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup",
@@ -310,7 +320,12 @@ func TestSetupAllowedFromLAN(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := New(cfg, am, slog.New(slog.NewTextHandler(io.Discard, nil)),
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	av, err := autovpn.New(cfg, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(cfg, am, av, log,
 		fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("x")}}).Handler()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup",

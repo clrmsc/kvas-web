@@ -200,6 +200,7 @@ loaders.overview = async () => {
     statBadge('Hysteria', hystDot, hystText),
     stat('Интерфейс', s.interface || '—'),
     stat('Резервный канал', s.failover === 'on' ? 'включён' : 'ручной режим'),
+    s.subscription_server ? stat('Сервер из подписки', s.subscription_server) : '',
   ].join('');
 };
 
@@ -370,7 +371,172 @@ $('#tags-list').addEventListener('click', async (e) => {
   } catch (err) { handle(err); await loaders.tags(); }
 });
 
+
+/* ---------------- Подписка ---------------- */
+
+let subState = null;
+
+loaders.subscription = async () => {
+  subState = await api('/api/subscription');
+  renderSubscription();
+};
+
+function renderSubscription() {
+  const s = subState;
+
+  $('#sub-url-current').textContent = s.configured
+    ? `Текущая ссылка: ${s.url_masked}`
+    : 'Ссылка ещё не задана';
+
+  $('#sub-enabled').checked = s.enabled;
+  $('#sub-autoapply').checked = s.auto_apply;
+  $('#sub-time').value = normalizeTime(s.check_time);
+  $('#sub-topn').value = String(s.speed_top_n);
+
+  $('#sub-status').innerHTML = [
+    stat('Активный сервер', s.active_name || 'не выбран'),
+    stat('Переключён', s.applied_at || '—'),
+    stat('Последняя проверка', s.last_check || 'ещё не было'),
+    stat('Следующая проверка', s.next_check || (s.enabled ? '—' : 'выключена')),
+  ].join('');
+
+  if (s.last_error) {
+    $('#sub-status').insertAdjacentHTML('beforeend',
+      `<div class="stat" style="grid-column:1/-1">
+         <div class="label">Последняя ошибка</div>
+         <div class="value" style="font-size:14px">${esc(s.last_error)}</div>
+       </div>`);
+  }
+
+  renderSubResults(s.results ?? []);
+}
+
+// Время из состояния приходит как «4:30», а полю нужно «04:30».
+function normalizeTime(value) {
+  const [h = '4', m = '30'] = String(value || '').split(':');
+  return `${h.padStart(2, '0')}:${m.padStart(2, '0')}`;
+}
+
+function renderSubResults(results) {
+  const list = $('#sub-results');
+  if (!results.length) {
+    list.innerHTML = '<div class="empty">Проверок ещё не было</div>';
+    return;
+  }
+  list.innerHTML = results.map((r) => {
+    const active = r.key === subState?.active_key;
+    let metrics;
+    if (r.error) {
+      metrics = `<span style="color:var(--err)">${esc(shortError(r.error))}</span>`;
+    } else {
+      const speed = r.speed_mbps
+        ? `${r.speed_mbps.toFixed(1)} Мбит/с`
+        : r.speed_error
+          ? `скорость не измерена: ${esc(shortError(r.speed_error))}`
+          : 'скорость не мерили';
+      metrics = `${Math.round(r.latency_ms)} мс · ${speed}`;
+    }
+
+    return `
+      <div class="item">
+        <span class="name">${esc(r.name)}
+          <div class="meta">${esc(r.address)}:${r.port} — ${metrics}</div>
+        </span>
+        ${active
+          ? '<span class="badge"><span class="dot ok"></span>активен</span>'
+          : `<button class="btn small" data-apply="${esc(r.key)}"${r.error ? ' disabled' : ''}>Применить</button>`}
+      </div>`;
+  }).join('');
+}
+
+// Ошибки от xray и сети бывают многострочными — в списке нужна одна строка.
+function shortError(text) {
+  const line = String(text).split('\n')[0];
+  return line.length > 90 ? `${line.slice(0, 90)}…` : line;
+}
+
+$('#sub-url-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const url = $('#sub-url').value.trim();
+  if (!url) { toast('Вставьте ссылку на подписку', 'err'); return; }
+  try {
+    subState = await api('/api/subscription', { method: 'POST', body: { url } });
+    $('#sub-url').value = '';
+    renderSubscription();
+    toast('Ссылка сохранена');
+  } catch (err) { handle(err); }
+});
+
+$('#sub-save-schedule').addEventListener('click', async () => {
+  try {
+    subState = await api('/api/subscription', {
+      method: 'POST',
+      body: {
+        enabled: $('#sub-enabled').checked,
+        auto_apply: $('#sub-autoapply').checked,
+        check_time: $('#sub-time').value || '04:30',
+        speed_top_n: Number($('#sub-topn').value),
+      },
+    });
+    renderSubscription();
+    toast('Расписание сохранено');
+  } catch (err) { handle(err); }
+});
+
+$('#sub-check').addEventListener('click', async () => {
+  const btn = $('#sub-check');
+  const progress = $('#sub-progress');
+  const seen = new Map();
+
+  btn.disabled = true;
+  progress.textContent = 'Проверяем…';
+  try {
+    await stream('/api/subscription/check', {
+      onEvent: (event, data) => {
+        if (event === 'result') {
+          // Один сервер приходит дважды: после замера задержки и скорости.
+          seen.set(data.key, data);
+          progress.textContent = `Проверено серверов: ${seen.size}`;
+          renderSubResults([...seen.values()]);
+        }
+        if (event === 'error') {
+          progress.textContent = '';
+          toast(data.error, 'err');
+        }
+        if (event === 'done') {
+          subState = data.state;
+          progress.textContent = '';
+          renderSubscription();
+          toast('Проверка завершена');
+        }
+      },
+    });
+  } catch (err) {
+    progress.textContent = '';
+    handle(err);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+$('#sub-results').addEventListener('click', async (e) => {
+  const key = e.target.dataset?.apply;
+  if (!key) return;
+  e.target.disabled = true;
+  e.target.textContent = 'Переключаем…';
+  try {
+    const r = await api('/api/subscription/apply', { method: 'POST', body: { key } });
+    subState = r.state;
+    renderSubscription();
+    toast(r.msg);
+  } catch (err) {
+    handle(err);
+    renderSubResults(subState?.results ?? []);
+  }
+});
+
 /* ---------------- Устройства ---------------- */
+
 
 const ROUTE_NAMES = { full: 'весь трафик', list: 'по списку', exclude: 'мимо туннеля' };
 

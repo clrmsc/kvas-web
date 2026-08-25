@@ -3,10 +3,12 @@ package kvas
 import (
 	"bufio"
 	"encoding/hex"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ProcessRunning ищет процесс с указанным именем среди /proc/<pid>/comm.
@@ -35,20 +37,32 @@ func ProcessRunning(name string) bool {
 }
 
 // PortListening проверяет, слушает ли кто-то указанный TCP-порт на локальной
-// машине, разбирая /proc/net/tcp — на роутере может не быть ни ss, ни netstat.
+// машине. Основной способ — разбор /proc/net/tcp: на роутере может не быть
+// ни ss, ни netstat. Если /proc недоступен (например, при разработке не под
+// Linux), пробуем просто подключиться.
 func PortListening(port int) bool {
+	procRead := false
 	for _, path := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
 		f, err := os.Open(path)
 		if err != nil {
 			continue
 		}
+		procRead = true
 		found := scanProcNetTCP(f, port)
 		f.Close()
 		if found {
 			return true
 		}
 	}
-	return false
+	if procRead {
+		return false
+	}
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 300*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
 
 func scanProcNetTCP(f *os.File, port int) bool {

@@ -44,6 +44,7 @@
     <button role="tab" data-tab="overview" aria-selected="true">Обзор</button>
     <button role="tab" data-tab="hosts" aria-selected="false">Домены</button>
     <button role="tab" data-tab="tags" aria-selected="false">Закваски</button>
+    <button role="tab" data-tab="subscription" aria-selected="false">Подписка</button>
     <button role="tab" data-tab="routes" aria-selected="false">Устройства</button>
     <button role="tab" data-tab="adblock" aria-selected="false">Реклама</button>
     <button role="tab" data-tab="settings" aria-selected="false">Настройки</button>
@@ -107,6 +108,82 @@
         <h2>Закваски</h2>
         <p class="hint">Готовые наборы доменов. Включение добавляет все домены набора в список.</p>
         <div class="list" id="tags-list"></div>
+      </div>
+    </section>
+
+
+    <!-- Подписка -->
+    <section data-panel="subscription" class="hidden">
+      <div class="card">
+        <h2>Ссылка на подписку</h2>
+        <p class="hint">
+          Адрес, по которому провайдер отдаёт список серверов
+          (<code>https://…/subscription/vless/…</code>). Хранится на роутере
+          и никуда больше не передаётся.
+        </p>
+        <form class="row" id="sub-url-form">
+          <input type="text" id="sub-url" class="grow" placeholder="https://пример.io/subscription/vless/…"
+                 autocapitalize="none" autocorrect="off" spellcheck="false">
+          <button class="btn primary" type="submit">Сохранить</button>
+        </form>
+        <div class="row" style="margin-top:10px">
+          <span class="meta" id="sub-url-current"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Текущий сервер</h2>
+        <div class="grid-2" id="sub-status"></div>
+      </div>
+
+      <div class="card">
+        <h2>Автоматический выбор</h2>
+        <p class="hint">
+          Раз в сутки все серверы подписки проверяются по задержке, а самые
+          отзывчивые — ещё и по скорости. Лучший становится рабочим.
+          Если на сегодня проверка ещё не выполнялась, она начнётся сразу
+          после сохранения — в том числе после перезагрузки роутера.
+        </p>
+
+        <div class="switch" style="margin-bottom:12px">
+          <input type="checkbox" id="sub-enabled">
+          <label class="track" for="sub-enabled"></label>
+          <span>Проверять раз в сутки</span>
+        </div>
+
+        <div class="switch" style="margin-bottom:12px">
+          <input type="checkbox" id="sub-autoapply">
+          <label class="track" for="sub-autoapply"></label>
+          <span>Переключаться на лучший автоматически</span>
+        </div>
+
+        <div class="row">
+          <label class="meta" for="sub-time">Время проверки</label>
+          <input type="time" id="sub-time" style="width:auto">
+
+          <label class="meta" for="sub-topn">Мерить скорость у лучших</label>
+          <select id="sub-topn" style="width:auto">
+            <option value="3">3 серверов</option>
+            <option value="5">5 серверов</option>
+            <option value="8">8 серверов</option>
+            <option value="12">12 серверов</option>
+          </select>
+
+          <button class="btn" id="sub-save-schedule">Сохранить расписание</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Проверка серверов</h2>
+        <p class="hint">
+          Полная проверка занимает несколько минут: задержка меряется у всех,
+          скорость — у лучших по задержке.
+        </p>
+        <div class="row">
+          <button class="btn primary" id="sub-check">Проверить сейчас</button>
+          <span class="meta" id="sub-progress"></span>
+        </div>
+        <div class="list" id="sub-results" style="margin-top:12px"></div>
       </div>
     </section>
 

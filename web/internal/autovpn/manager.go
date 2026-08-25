@@ -1,0 +1,387 @@
+package autovpn
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sync"
+	"time"
+
+	"github.com/clrmsc/kvas-web/web/internal/config"
+	"github.com/clrmsc/kvas-web/web/internal/kvas"
+	"github.com/clrmsc/kvas-web/web/internal/probe"
+	"github.com/clrmsc/kvas-web/web/internal/subscription"
+)
+
+// Manager владеет состоянием подписки и умеет проверять серверы
+// и переключать на них Квас.
+type Manager struct {
+	cfg config.Config
+	log *slog.Logger
+
+	mu    sync.Mutex
+	state State
+
+	// running не даёт запустить две проверки разом: каждая поднимает xray,
+	// а на роутере это заметная нагрузка.
+	running   bool
+	runningMu sync.Mutex
+}
+
+// New загружает сохранённое состояние подписки.
+func New(cfg config.Config, log *slog.Logger) (*Manager, error) {
+	st, err := loadState(cfg.SubscriptionFile())
+	if err != nil {
+		// Повреждённый файл не должен мешать работе остального интерфейса.
+		log.Warn("состояние подписки не прочитано", "err", err)
+		st = DefaultState()
+	}
+	return &Manager{cfg: cfg, log: log, state: st}, nil
+}
+
+// State возвращает копию текущего состояния.
+func (m *Manager) State() State {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.state
+}
+
+// Settings — изменяемые пользователем настройки.
+type Settings struct {
+	URL       *string
+	Enabled   *bool
+	AutoApply *bool
+	CheckTime *string
+	SpeedTopN *int
+}
+
+// UpdateSettings применяет только переданные поля.
+func (m *Manager) UpdateSettings(s Settings) (State, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	next := m.state
+	if s.URL != nil {
+		url := *s.URL
+		if url != "" {
+			if err := subscription.ValidateURL(url); err != nil {
+				return m.state, err
+			}
+		}
+		next.URL = url
+		// Ссылка сменилась — прежние результаты относятся к другой подписке.
+		if url != m.state.URL {
+			next.Results = []probe.Result{}
+			next.LastCheck = time.Time{}
+			next.LastError = ""
+		}
+	}
+	if s.Enabled != nil {
+		next.Enabled = *s.Enabled
+	}
+	if s.AutoApply != nil {
+		next.AutoApply = *s.AutoApply
+	}
+	if s.CheckTime != nil {
+		if err := ValidateCheckTime(*s.CheckTime); err != nil {
+			return m.state, err
+		}
+		next.CheckTime = *s.CheckTime
+	}
+	if s.SpeedTopN != nil {
+		n := *s.SpeedTopN
+		if n < 1 || n > 20 {
+			return m.state, fmt.Errorf("проверять по скорости можно от 1 до 20 серверов")
+		}
+		next.SpeedTopN = n
+	}
+
+	if err := saveState(m.cfg.SubscriptionFile(), next); err != nil {
+		return m.state, err
+	}
+	m.state = next
+	return next, nil
+}
+
+// Servers скачивает подписку и разбирает её.
+func (m *Manager) Servers(ctx context.Context) ([]subscription.Server, error) {
+	st := m.State()
+	if !st.Configured() {
+		return nil, fmt.Errorf("ссылка на подписку не задана")
+	}
+	return subscription.FetchAndParse(ctx, st.URL)
+}
+
+// CheckRun — идущая проверка. События приходят в Events по мере готовности,
+// закрытие канала означает, что проверка завершилась.
+type CheckRun struct {
+	Events <-chan probe.Result
+}
+
+// maxCheckDuration ограничивает фоновую проверку: три десятка серверов
+// с замерами скорости укладываются в минуты, всё дольше — зависание.
+const maxCheckDuration = 30 * time.Minute
+
+// StartCheck запускает проверку в фоне и возвращает поток её событий.
+// Проверка живёт независимо от HTTP-запроса: если пользователь закрыл
+// вкладку, она всё равно доведётся до конца и переключит туннель.
+func (m *Manager) StartCheck() (*CheckRun, error) {
+	m.runningMu.Lock()
+	defer m.runningMu.Unlock()
+	if m.running {
+		return nil, ErrCheckInProgress
+	}
+	m.running = true
+
+	events := make(chan probe.Result, 64)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), maxCheckDuration)
+		defer cancel()
+		defer close(events)
+		defer func() {
+			m.runningMu.Lock()
+			m.running = false
+			m.runningMu.Unlock()
+		}()
+
+		m.runCheck(ctx, func(r probe.Result) {
+			// Подписчик может читать медленнее или уже отключиться —
+			// проверку это тормозить не должно.
+			select {
+			case events <- r:
+			default:
+			}
+		})
+	}()
+
+	return &CheckRun{Events: events}, nil
+}
+
+// ErrCheckInProgress возвращается, когда проверка уже идёт.
+var ErrCheckInProgress = errors.New("проверка серверов уже идёт")
+
+// Running сообщает, идёт ли проверка прямо сейчас.
+func (m *Manager) Running() bool {
+	m.runningMu.Lock()
+	defer m.runningMu.Unlock()
+	return m.running
+}
+
+// runCheck выполняет саму проверку: скачивает подписку, меряет серверы,
+// сохраняет результаты и при включённом автоприменении переключает туннель.
+func (m *Manager) runCheck(ctx context.Context, onResult func(probe.Result)) ([]probe.Result, error) {
+	servers, err := m.Servers(ctx)
+	if err != nil {
+		m.recordError(err)
+		return nil, err
+	}
+
+	st := m.State()
+	opt := probe.DefaultOptions()
+	opt.XrayBin = m.cfg.XrayBin
+	opt.SpeedTestURL = m.cfg.SpeedTestURL
+	opt.SpeedTopN = st.SpeedTopN
+
+	m.log.Info("проверка серверов подписки началась", "серверов", len(servers))
+	results := probe.CheckAll(ctx, servers, opt, onResult)
+	probe.Sort(results)
+
+	m.mu.Lock()
+	m.state.Results = results
+	m.state.LastCheck = time.Now()
+	m.state.LastError = ""
+	stateCopy := m.state
+	m.mu.Unlock()
+	if err := saveState(m.cfg.SubscriptionFile(), stateCopy); err != nil {
+		m.log.Warn("состояние подписки не сохранено", "err", err)
+	}
+
+	alive := 0
+	for _, r := range results {
+		if r.Alive() {
+			alive++
+		}
+	}
+	m.log.Info("проверка серверов подписки завершена", "доступно", alive, "всего", len(results))
+
+	if !stateCopy.AutoApply || len(results) == 0 || !results[0].Alive() {
+		return results, nil
+	}
+	if results[0].Key == stateCopy.ActiveKey {
+		m.log.Info("лучший сервер уже используется", "сервер", results[0].Name)
+		return results, nil
+	}
+	if err := m.Apply(ctx, results[0].Key); err != nil {
+		m.log.Error("не удалось переключиться на лучший сервер",
+			"сервер", results[0].Name, "err", err)
+		m.recordError(err)
+	}
+	return results, nil
+}
+
+// Apply переключает Квас на сервер с указанным ключом (адрес:порт).
+// Прежний конфиг сохраняется: если xray не поднимется, возвращаем как было.
+func (m *Manager) Apply(ctx context.Context, key string) error {
+	servers, err := m.Servers(ctx)
+	if err != nil {
+		return err
+	}
+	var target *subscription.Server
+	for i := range servers {
+		if servers[i].Key() == key {
+			target = &servers[i]
+			break
+		}
+	}
+	if target == nil {
+		return fmt.Errorf("сервер %s не найден в подписке", key)
+	}
+
+	opt := subscription.DefaultXrayOptions()
+	opt.ListenPort = m.cfg.ProxyPort
+	cfgData, err := subscription.XrayConfig(*target, opt)
+	if err != nil {
+		return err
+	}
+
+	// Проверяем конфигурацию до подмены рабочей: xray откажется стартовать
+	// с ошибочной, и туннель останется лежать.
+	if err := m.testConfig(ctx, cfgData); err != nil {
+		return err
+	}
+
+	backup, hadBackup, err := m.backupConfig()
+	if err != nil {
+		return err
+	}
+	if err := kvas.WriteFileAtomic(m.cfg.XrayConf, cfgData, 0o644); err != nil {
+		return fmt.Errorf("не удалось записать конфигурацию xray: %w", err)
+	}
+
+	if err := m.restartXray(ctx); err != nil {
+		m.rollback(ctx, backup, hadBackup)
+		return err
+	}
+	if err := m.waitProxy(ctx); err != nil {
+		m.rollback(ctx, backup, hadBackup)
+		return fmt.Errorf("туннель не поднялся на сервере %s: %w", target.Name, err)
+	}
+
+	m.mu.Lock()
+	m.state.ActiveKey = target.Key()
+	m.state.ActiveName = target.Name
+	m.state.AppliedAt = time.Now()
+	stateCopy := m.state
+	m.mu.Unlock()
+	if err := saveState(m.cfg.SubscriptionFile(), stateCopy); err != nil {
+		m.log.Warn("состояние подписки не сохранено", "err", err)
+	}
+
+	m.log.Info("туннель переключён на сервер подписки",
+		"сервер", target.Name, "адрес", target.Endpoint())
+	return nil
+}
+
+// testConfig просит xray проверить конфигурацию во временном файле.
+func (m *Manager) testConfig(ctx context.Context, cfgData []byte) error {
+	tmp, err := os.CreateTemp("", "kvasweb-xray-*.json")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(cfgData); err != nil {
+		tmp.Close()
+		return err
+	}
+	tmp.Close()
+
+	if _, err := os.Stat(m.cfg.XrayBin); err != nil {
+		// xray не установлен — проверять нечем, но и подменять нечего.
+		return fmt.Errorf("xray не найден по пути %s", m.cfg.XrayBin)
+	}
+	testCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(testCtx, m.cfg.XrayBin, "run", "-test", "-c", tmp.Name()).CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("xray отверг конфигурацию: %s", kvas.StripANSI(string(out)))
+	}
+	return nil
+}
+
+func (m *Manager) backupConfig() (string, bool, error) {
+	data, err := os.ReadFile(m.cfg.XrayConf)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	backup := filepath.Join(filepath.Dir(m.cfg.XrayConf), filepath.Base(m.cfg.XrayConf)+".kvasweb-bak")
+	if err := kvas.WriteFileAtomic(backup, data, 0o644); err != nil {
+		return "", false, err
+	}
+	return backup, true, nil
+}
+
+func (m *Manager) rollback(ctx context.Context, backup string, had bool) {
+	if !had {
+		return
+	}
+	data, err := os.ReadFile(backup)
+	if err != nil {
+		m.log.Error("не удалось прочитать резервную копию конфигурации xray", "err", err)
+		return
+	}
+	if err := kvas.WriteFileAtomic(m.cfg.XrayConf, data, 0o644); err != nil {
+		m.log.Error("не удалось вернуть прежнюю конфигурацию xray", "err", err)
+		return
+	}
+	if err := m.restartXray(ctx); err != nil {
+		m.log.Error("прежняя конфигурация возвращена, но xray не перезапустился", "err", err)
+		return
+	}
+	m.log.Warn("переключение отменено, возвращён прежний сервер")
+}
+
+func (m *Manager) restartXray(ctx context.Context) error {
+	if _, err := os.Stat(m.cfg.XrayInit); err != nil {
+		return fmt.Errorf("не найден init-скрипт xray: %s", m.cfg.XrayInit)
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(runCtx, m.cfg.XrayInit, "restart").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("xray не перезапустился: %s", kvas.StripANSI(string(out)))
+	}
+	return nil
+}
+
+// waitProxy убеждается, что xray снова слушает рабочий SOCKS-порт.
+func (m *Manager) waitProxy(ctx context.Context) error {
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if kvas.PortListening(m.cfg.ProxyPort) {
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return fmt.Errorf("порт %d не открылся", m.cfg.ProxyPort)
+}
+
+func (m *Manager) recordError(err error) {
+	m.mu.Lock()
+	m.state.LastError = err.Error()
+	m.state.LastCheck = time.Now()
+	stateCopy := m.state
+	m.mu.Unlock()
+	if saveErr := saveState(m.cfg.SubscriptionFile(), stateCopy); saveErr != nil {
+		m.log.Warn("состояние подписки не сохранено", "err", saveErr)
+	}
+}

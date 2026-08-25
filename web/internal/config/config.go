@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 // Config — все внешние зависимости сервиса, собранные в одном месте,
@@ -23,6 +24,12 @@ type Config struct {
 	TLSCert      string // опционально
 	TLSKey       string // опционально
 	RCIAddr      string // Keenetic RCI, обычно 127.0.0.1:79
+
+	XrayBin      string // /opt/sbin/xray
+	XrayConf     string // /opt/etc/xray/kvas.json — рабочий конфиг туннеля
+	XrayInit     string // /opt/etc/init.d/S97xray
+	ProxyPort    int    // локальный SOCKS-порт xray, который слушает Квас
+	SpeedTestURL string // откуда качать при замере скорости
 }
 
 // Default возвращает конфигурацию для штатной установки на роутере.
@@ -39,6 +46,12 @@ func Default() Config {
 		StateDir:     "/opt/etc/kvas-web",
 		LogFile:      "/opt/var/log/kvas-web.log",
 		RCIAddr:      "127.0.0.1:79",
+
+		XrayBin:      "/opt/sbin/xray",
+		XrayConf:     "/opt/etc/xray/kvas.json",
+		XrayInit:     "/opt/etc/init.d/S97xray",
+		ProxyPort:    1097,
+		SpeedTestURL: "https://speed.cloudflare.com/__down?bytes=20000000",
 	}
 }
 
@@ -61,6 +74,11 @@ func FromFlags(args []string) (Config, error) {
 	fs.StringVar(&c.TLSCert, "tls-cert", envOr("KVASWEB_TLS_CERT", ""), "сертификат TLS (включает HTTPS)")
 	fs.StringVar(&c.TLSKey, "tls-key", envOr("KVASWEB_TLS_KEY", ""), "ключ TLS")
 	fs.StringVar(&c.RCIAddr, "rci", envOr("KVASWEB_RCI", c.RCIAddr), "адрес Keenetic RCI")
+	fs.StringVar(&c.XrayBin, "xray-bin", envOr("KVASWEB_XRAY_BIN", c.XrayBin), "путь к xray")
+	fs.StringVar(&c.XrayConf, "xray-conf", envOr("KVASWEB_XRAY_CONF", c.XrayConf), "путь к рабочему конфигу xray")
+	fs.StringVar(&c.XrayInit, "xray-init", envOr("KVASWEB_XRAY_INIT", c.XrayInit), "init-скрипт xray")
+	fs.IntVar(&c.ProxyPort, "proxy-port", envIntOr("KVASWEB_PROXY_PORT", c.ProxyPort), "локальный SOCKS-порт xray")
+	fs.StringVar(&c.SpeedTestURL, "speedtest-url", envOr("KVASWEB_SPEEDTEST_URL", c.SpeedTestURL), "адрес файла для замера скорости")
 	if err := fs.Parse(args); err != nil {
 		return c, err
 	}
@@ -70,9 +88,22 @@ func FromFlags(args []string) (Config, error) {
 // PassFile — файл с хэшем пароля администратора.
 func (c Config) PassFile() string { return filepath.Join(c.StateDir, "password") }
 
+// SubscriptionFile — состояние подписки: ссылка, расписание, результаты
+// последней проверки.
+func (c Config) SubscriptionFile() string { return filepath.Join(c.StateDir, "subscription.json") }
+
 // SessionFile — файл, куда сохраняются активные сессии, чтобы перезапуск
 // сервиса не разлогинивал пользователя.
 func (c Config) SessionFile() string { return filepath.Join(c.StateDir, "sessions") }
+
+func envIntOr(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
 
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {

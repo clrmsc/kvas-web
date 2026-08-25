@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/clrmsc/kvas-web/web/internal/auth"
+	"github.com/clrmsc/kvas-web/web/internal/autovpn"
 	"github.com/clrmsc/kvas-web/web/internal/config"
 	"github.com/clrmsc/kvas-web/web/internal/httpapi"
 	"github.com/clrmsc/kvas-web/web/ui"
@@ -55,9 +56,14 @@ func run(args []string) error {
 		return fmt.Errorf("не удалось подготовить хранилище паролей: %w", err)
 	}
 
+	av, err := autovpn.New(cfg, logger)
+	if err != nil {
+		return fmt.Errorf("не удалось подготовить подписку: %w", err)
+	}
+
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           httpapi.New(cfg, am, logger, ui.FS()).Handler(),
+		Handler:           httpapi.New(cfg, am, av, logger, ui.FS()).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		// Пишущий таймаут не ставим: импорт списков и обновление отдают
 		// прогресс потоком и могут идти минутами.
@@ -66,6 +72,9 @@ func run(args []string) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Суточная проверка серверов подписки живёт столько же, сколько сервис.
+	go av.RunScheduler(ctx)
 
 	errCh := make(chan error, 1)
 	go func() {

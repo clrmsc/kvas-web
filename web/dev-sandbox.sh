@@ -54,4 +54,36 @@ chmod +x "$SANDBOX/kvas"
 [ -f "$SANDBOX/dnsmasq.conf" ] || printf 'port=9753\n' > "$SANDBOX/dnsmasq.conf"
 [ -f "$SANDBOX/kvas.conf" ] || printf 'APP_VERSION=1.1.9\nINFACE_ENT=Proxy21\nroute_full_ip=192.168.1.50\nroute_excluded_ip=192.168.1.77\n' > "$SANDBOX/kvas.conf"
 
+
+# Заглушка xray: обычный SOCKS5 без шифрования. Позволяет проверить замер
+# скорости и переключение серверов без роутера.
+go build -o "$SANDBOX/fakexray" ./cmd/fakexray
+
+# Заглушка init-скрипта xray.
+cat > "$SANDBOX/S97xray" <<'XRAYINIT'
+#!/bin/sh
+SANDBOX=/tmp/kvasweb-dev
+PIDFILE="$SANDBOX/fakexray.pid"
+
+start() {
+	[ -f "$SANDBOX/xray.json" ] || { echo "нет конфигурации"; exit 1; }
+	"$SANDBOX/fakexray" run -c "$SANDBOX/xray.json" >> "$SANDBOX/fakexray.log" 2>&1 &
+	echo $! > "$PIDFILE"
+}
+
+stop() {
+	[ -f "$PIDFILE" ] && kill "$(cat "$PIDFILE")" 2>/dev/null
+	rm -f "$PIDFILE"
+}
+
+case "$1" in
+	start) start ;;
+	stop) stop ;;
+	restart) stop; sleep 1; start ;;
+	check|status) [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null ;;
+	*) echo "использование: $0 {start|stop|restart|check}"; exit 1 ;;
+esac
+XRAYINIT
+chmod +x "$SANDBOX/S97xray"
+
 echo "Песочница готова: $SANDBOX"

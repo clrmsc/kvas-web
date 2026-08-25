@@ -26,6 +26,8 @@ type statusResponse struct {
 	VLESS     svc    `json:"vless"`
 	Hysteria  svc    `json:"hysteria"`
 	Interface string `json:"interface"`
+	// Сервер, выбранный из подписки; пусто, если подписка не используется.
+	SubscriptionServer string `json:"subscription_server,omitempty"`
 }
 
 type svc struct {
@@ -46,15 +48,16 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := statusResponse{
-		OK:        true,
-		Package:   "kvas",
-		Version:   kvas.PackageVersion("kvas"),
-		Mode:      s.detectMode(conf),
-		Failover:  s.failoverMode(),
-		Hosts:     len(hosts),
-		Tags:      len(tags),
-		Adblock:   kvas.FileHasLine(s.cfg.DnsmasqConf, "addn-hosts=/opt/etc/adblock/ads.kvas.list"),
-		Interface: conf["INFACE_ENT"],
+		OK:                 true,
+		Package:            "kvas",
+		Version:            kvas.PackageVersion("kvas"),
+		Mode:               s.detectMode(conf),
+		Failover:           s.failoverMode(),
+		Hosts:              len(hosts),
+		Tags:               len(tags),
+		Adblock:            kvas.FileHasLine(s.cfg.DnsmasqConf, "addn-hosts=/opt/etc/adblock/ads.kvas.list"),
+		Interface:          conf["INFACE_ENT"],
+		SubscriptionServer: s.autovpn.State().ActiveName,
 		VLESS: svc{
 			Running: kvas.ProcessRunning("xray"),
 			Tunnel:  kvas.PortListening(vlessSOCKSPort),

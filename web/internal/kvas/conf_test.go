@@ -1,6 +1,7 @@
 package kvas
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -92,5 +93,28 @@ func TestReadListMissingFile(t *testing.T) {
 	}
 	if len(list) != 0 {
 		t.Errorf("ожидался пустой список, получено %v", list)
+	}
+}
+
+func TestPortListening(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	if !PortListening(port) {
+		t.Errorf("занятый порт %d определён как свободный", port)
+	}
+
+	ln2, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	freePort := ln2.Addr().(*net.TCPAddr).Port
+	ln2.Close()
+	if PortListening(freePort) {
+		t.Errorf("свободный порт %d определён как занятый", freePort)
 	}
 }
