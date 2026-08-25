@@ -7,21 +7,36 @@
 > от инъекций. Плюс подписка на серверы VLESS с суточным выбором самого
 > быстрого. Подробности — в [web/README.md](web/README.md).
 >
-> ### Установка веб-интерфейса
+> ### Установка
 >
-> Ставится поверх уже установленного Кваса, сам пакет не трогает.
-> По SSH в Entware (`ssh root@<адрес роутера> -p 222`):
+> По SSH в Entware (`ssh root@<адрес роутера> -p 222`).
+>
+> **Если Кваса на роутере ещё нет** — ставится всё сразу: сам Квас,
+> зависимости и веб-интерфейс.
+>
+> ```sh
+> opkg install curl
+> curl -fsSL https://raw.githubusercontent.com/clrmsc/kvas-web/main/install.sh | sh
+> ```
+>
+> Дальше — `kvas setup` для первичной настройки и браузер на `http://<адрес роутера>:8085/`.
+>
+> **Если Квас уже стоит** (в том числе оригинальный) и нужен только
+> веб-интерфейс — он добавится, не трогая сам пакет:
 >
 > ```sh
 > curl -fsSL https://raw.githubusercontent.com/clrmsc/kvas-web/main/install-web.sh | sh
 > ```
 >
-> Скрипт определит архитектуру роутера, скачает бинарник из последнего
-> релиза, поставит автозапуск и поднимет интерфейс на порту 8085.
 > При первом входе браузер попросит задать пароль администратора.
+> Управление: `kvas web {status|restart|off}` или
+> `/opt/etc/init.d/S99kvasweb`, журнал — `/opt/var/log/kvas-web.log`.
 >
-> Управление: `/opt/etc/init.d/S99kvasweb {start|stop|restart|check}`,
-> журнал — `/opt/var/log/kvas-web.log`.
+> ### Сборка
+>
+> Пакет собирается без Entware buildroot: `make -C web all` собирает
+> бинарники веб-интерфейса, `sh build-ipk.sh` — сами ipk под каждую
+> архитектуру.
 
 ![GitHub Repo stars](https://img.shields.io/github/stars/qzeleza/kvas?color=orange) ![GitHub closed issues](https://img.shields.io/github/issues-closed/qzeleza/kvas?color=success) ![GitHub last commit](https://img.shields.io/github/last-commit/qzeleza/kvas) ![GitHub commit activity](https://img.shields.io/github/commit-activity/y/qzeleza/kvas) ![GitHub top language](https://img.shields.io/github/languages/top/qzeleza/kvas) ![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/qzeleza/kvas) 
 # [КВАС](https://forum.keenetic.com/topic/14415-пробуем-квас-shadowsocks-и-другие-vpn-клиенты) - защита ваших подключений #

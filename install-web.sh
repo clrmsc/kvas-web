@@ -31,7 +31,11 @@ fail() { printf "%b\n" "${RED}Ошибка:${NOCL} $*" >&2; exit 1; }
 # ------------------------------------------------------------------
 
 [ -x "${KVAS_DIR}/bin/kvas" ] || fail "не найден Квас в ${KVAS_DIR}.
-Сначала установите сам пакет: https://github.com/qzeleza/kvas"
+
+Этот скрипт добавляет веб-интерфейс к уже установленному Квасу.
+Если Кваса на роутере ещё нет, поставьте всё сразу одной командой:
+
+  curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | sh"
 
 command -v curl >/dev/null 2>&1 || fail "не найден curl. Установите: opkg install curl"
 
