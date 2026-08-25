@@ -4,9 +4,24 @@
 > на версии `1.1.9-beta-10`. Отличие от оригинала — веб-интерфейс: вместо
 > HTTP-сервера на socat с обработчиками на shell здесь один статический
 > бинарник на Go со вшитым интерфейсом, нормальной аутентификацией и защитой
-> от инъекций. Подробности — в [web/README.md](web/README.md).
+> от инъекций. Плюс подписка на серверы VLESS с суточным выбором самого
+> быстрого. Подробности — в [web/README.md](web/README.md).
 >
-> Открыть после установки: `http://<адрес роутера>:8085/` (`kvas web`).
+> ### Установка веб-интерфейса
+>
+> Ставится поверх уже установленного Кваса, сам пакет не трогает.
+> По SSH в Entware (`ssh root@<адрес роутера> -p 222`):
+>
+> ```sh
+> curl -fsSL https://raw.githubusercontent.com/clrmsc/kvas-web/main/install-web.sh | sh
+> ```
+>
+> Скрипт определит архитектуру роутера, скачает бинарник из последнего
+> релиза, поставит автозапуск и поднимет интерфейс на порту 8085.
+> При первом входе браузер попросит задать пароль администратора.
+>
+> Управление: `/opt/etc/init.d/S99kvasweb {start|stop|restart|check}`,
+> журнал — `/opt/var/log/kvas-web.log`.
 
 ![GitHub Repo stars](https://img.shields.io/github/stars/qzeleza/kvas?color=orange) ![GitHub closed issues](https://img.shields.io/github/issues-closed/qzeleza/kvas?color=success) ![GitHub last commit](https://img.shields.io/github/last-commit/qzeleza/kvas) ![GitHub commit activity](https://img.shields.io/github/commit-activity/y/qzeleza/kvas) ![GitHub top language](https://img.shields.io/github/languages/top/qzeleza/kvas) ![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/qzeleza/kvas) 
 # [КВАС](https://forum.keenetic.com/topic/14415-пробуем-квас-shadowsocks-и-другие-vpn-клиенты) - защита ваших подключений #
