@@ -90,3 +90,4 @@ fabric.properties
 !/tests/
 #ipk/
 ipk/kvas_1.1.9_beta-10-*.ipk
+
