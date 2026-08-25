@@ -4,9 +4,10 @@ MONITOR_PID_FILE=/var/run/kvas-monitor.pid
 MONITOR_WEB_PID_FILE=/var/run/kvas-monitor-web.pid
 MONITOR_DNS_LOG=/tmp/kvas-dns.log
 MONITOR_DATA_DIR=/tmp/kvas-monitor
-MONITOR_WWW_DIR=/opt/apps/kvas/bin/monitor/www
+KVAS_WEB_BIN=/opt/apps/kvas/bin/kvasweb
 MONITOR_PORT=8085
 MONITOR_WEB_LOG=/tmp/kvas-monitor-web.log
+KVAS_WEB_LOG=/opt/var/log/kvas-web.log
 
 monitor__enable_dns_log() {
 	# DO NOT modify system dnsmasq.conf or restart dnsmasq
@@ -413,154 +414,49 @@ cmd_monitor_start() {
 }
 
 cmd_monitor_web_start() {
-	if [ -f "$MONITOR_WEB_PID_FILE" ] && kill -0 "$(cat "$MONITOR_WEB_PID_FILE")" 2>/dev/null; then
+	if [ ! -x "$KVAS_WEB_BIN" ]; then
+		echo "ОШИБКА: не найден $KVAS_WEB_BIN"
+		echo "Переустановите пакет: kvas upgrade"
+		return 1
+	fi
+
+	if /opt/etc/init.d/S99kvasweb check >/dev/null 2>&1; then
 		echo "Веб-интерфейс уже запущен на порту $MONITOR_PORT"
-		echo "Откройте: http://$(hostname):$MONITOR_PORT/"
-		monitor__web_log "web ui already running on port $MONITOR_PORT"
-		monitor__web_log_show
-		return
+		echo "Откройте: http://$(_kvas_web_host):$MONITOR_PORT/"
+		return 0
 	fi
 
-	monitor__web_log_reset
-	monitor__web_log "starting web ui on port $MONITOR_PORT"
+	/opt/etc/init.d/S99kvasweb start >/dev/null 2>&1
+	sleep 1
 
-	# Diagnostic: check dependencies
-	local has_socat=0 has_conntrack=0 has_python=0 has_curl=0 has_jq=0
-	command -v socat >/dev/null 2>&1 && has_socat=1
-	command -v conntrack >/dev/null 2>&1 && has_conntrack=1
-	command -v python3 >/dev/null 2>&1 && has_python=1
-	command -v curl >/dev/null 2>&1 && has_curl=1
-	command -v jq >/dev/null 2>&1 && has_jq=1
-
-	monitor__web_log "deps: socat=$has_socat conntrack=$has_conntrack python=$has_python curl=$has_curl jq=$has_jq"
-	# Auto-install socat if missing
-	if [ "$has_socat" -eq 0 ]; then
-		echo "Устанавливаю socat..."
-		opkg update >/dev/null 2>&1
-		opkg install socat >/dev/null 2>&1
-		if command -v socat >/dev/null 2>&1; then
-			has_socat=1
-			echo "socat установлен"
-			monitor__web_log "socat installed"
-		fi
+	if /opt/etc/init.d/S99kvasweb check >/dev/null 2>&1; then
+		echo "Веб-интерфейс запущен: http://$(_kvas_web_host):$MONITOR_PORT/"
+		echo "При первом входе браузер попросит задать пароль администратора."
+	else
+		echo "Веб-интерфейс не запустился. Журнал: $KVAS_WEB_LOG"
+		[ -f "$KVAS_WEB_LOG" ] && tail -20 "$KVAS_WEB_LOG"
+		return 1
 	fi
-
-
-	if [ "$has_socat" -eq 0 ] && [ "$has_python" -eq 0 ]; then
-		echo "ОШИБКА: Нет HTTP backend для web UI"
-		echo "Установите: opkg install socat"
-		monitor__web_log "no http backend: socat and python missing"
-		monitor__web_log_show
-		return
-	fi
-
-	# Prepare web root
-	mkdir -p "$MONITOR_WWW_DIR/cgi-bin"
-	[ -f "$MONITOR_WWW_DIR/cgi-bin/data.sh" ] && chmod 755 "$MONITOR_WWW_DIR/cgi-bin/data.sh"
-	[ -f "$MONITOR_WWW_DIR/index.html" ] || { echo "ОШИБКА: $MONITOR_WWW_DIR/index.html не найден"; monitor__web_log "index.html missing"; monitor__web_log_show; return; }
-	monitor__web_log "web root ready at $MONITOR_WWW_DIR"
-
-	# DNS log
-	monitor__enable_dns_log
-	monitor__web_log "dns log enabled at $MONITOR_DNS_LOG"
-
-	# Auto-install conntrack if missing
-	if [ "$has_conntrack" -eq 0 ]; then
-		echo "Устанавливаю conntrack..."
-		monitor__web_log "conntrack not found, installing via opkg"
-		{ opkg update; opkg install conntrack; } >> "$MONITOR_WEB_LOG" 2>&1
-		if command -v conntrack >/dev/null 2>&1; then
-			echo "conntrack установлен"
-			monitor__web_log "conntrack installed"
-			has_conntrack=1
-		else
-			echo "ВНИМАНИЕ: conntrack не установлен — соединения не будут отслеживаться"
-			monitor__web_log "conntrack install failed"
-		fi
-	fi
-
-	# Show what's available
-	echo "Компоненты: socat=$([ $has_socat -eq 1 ] && echo ok || echo нет) conntrack=$([ $has_conntrack -eq 1 ] && echo ok || echo нет) curl=$([ $has_curl -eq 1 ] && echo ok || echo нет) jq=$([ $has_jq -eq 1 ] && echo ok || echo нет)"
-
-	# Start server
-	local result
-	result=$(MONITOR_WEB_LOG="$MONITOR_WEB_LOG" sh /opt/apps/kvas/bin/monitor/launcher.sh 2>&1)
-	local rc=$?
-	[ -n "$result" ] && monitor__web_log "launcher output: $result"
-	monitor__web_log "launcher exit code: $rc"
-
-	case "$result" in
-		OK*)
-			local tool=$(echo "$result" | cut -d' ' -f2)
-			echo ""
-			echo "Web UI запущен ($tool) на порту $MONITOR_PORT"
-			echo "Откройте: http://$(hostname):$MONITOR_PORT/"
-			[ "$has_conntrack" -eq 0 ] && echo "ВНИМАНИЕ: conntrack не установлен — данные о соединениях не будут отображаться"
-			[ "$has_curl" -eq 0 ] && echo "ВНИМАНИЕ: curl не установлен — список DHCP устройств не будет загружен"
-			monitor__web_log "web ui started: backend=$tool port=$MONITOR_PORT"
-			;;
-		ERROR*)
-			echo "ОШИБКА запуска: $result"
-			monitor__web_log "web ui start failed: $result"
-			rm -f "$MONITOR_WEB_PID_FILE"
-			;;
-		*)
-			if [ "$rc" -ne 0 ]; then
-				echo "ОШИБКА запуска web UI (код $rc): $result"
-				monitor__web_log "web ui start failed: rc=$rc output=$result"
-				rm -f "$MONITOR_WEB_PID_FILE"
-			fi
-			;;
-	esac
-	monitor__web_log_show
 }
 
 cmd_monitor_web_stop() {
-	monitor__web_log "stopping web ui on port $MONITOR_PORT"
-
-	# Kill ALL socat processes on this port (main + children)
-	if command -v pkill >/dev/null 2>&1; then
-		# pkill kills all matching processes
-		pkill -f "socat.*TCP-LISTEN:${MONITOR_PORT}" 2>/dev/null
-		monitor__web_log "killed socat processes via pkill"
-	elif command -v killall >/dev/null 2>&1; then
-		killall socat 2>/dev/null
-		monitor__web_log "killed all socat via killall"
-	fi
-
-	# Kill by PID file and its children
-	if [ -f "$MONITOR_WEB_PID_FILE" ]; then
-		local pid=$(cat "$MONITOR_WEB_PID_FILE" 2>/dev/null)
-		if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-			monitor__web_log "killing pid $pid and children"
-			# Kill process group (negative PID = kill group)
-			kill -- -"$pid" 2>/dev/null
-			# Also kill directly
-			kill "$pid" 2>/dev/null
-			sleep 1
-			kill -9 "$pid" 2>/dev/null
-			kill -9 -- -"$pid" 2>/dev/null
-		fi
-	fi
-
-	# Kill by port (catch orphan socat/httpd processes)
-	if command -v netstat >/dev/null 2>&1; then
-		local pids=$(netstat -tulnp 2>/dev/null | grep ":${MONITOR_PORT} " | awk '{print $NF}' | cut -d/ -f1)
-		for pid in $pids; do
-			monitor__web_log "killing port listener pid $pid"
-			kill "$pid" 2>/dev/null
-			kill -9 "$pid" 2>/dev/null
-		done
-	fi
-
-	# Kill any remaining handler scripts
-	pkill -f "kvas-httpd-handler" 2>/dev/null
-	pkill -f "data.sh" 2>/dev/null
-
-	# Also call launcher stop for cleanup
-	sh /opt/apps/kvas/bin/monitor/launcher.sh stop 2>/dev/null
-	rm -f "$MONITOR_WEB_PID_FILE"
-	monitor__disable_dns_log
+	/opt/etc/init.d/S99kvasweb stop >/dev/null 2>&1
 	echo "Веб-интерфейс остановлен"
-	monitor__web_log "web ui stopped"
+}
+
+cmd_monitor_web_status() {
+	if /opt/etc/init.d/S99kvasweb check >/dev/null 2>&1; then
+		echo "Веб-интерфейс работает: http://$(_kvas_web_host):$MONITOR_PORT/"
+	else
+		echo "Веб-интерфейс остановлен"
+	fi
+}
+
+# Адрес роутера в домашней сети — его удобнее открыть, чем имя хоста.
+_kvas_web_host() {
+	local ip
+	ip=$(/opt/sbin/ip -o -4 addr show br0 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)
+	[ -z "$ip" ] && ip=$(hostname 2>/dev/null)
+	[ -z "$ip" ] && ip="192.168.1.1"
+	echo "$ip"
 }

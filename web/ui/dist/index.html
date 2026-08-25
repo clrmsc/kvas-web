@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <title>Квас — управление</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🍞</text></svg>">
+</head>
+<body>
+
+<!-- Экран входа и первичной настройки пароля -->
+<section id="login" class="hidden">
+  <form class="card" id="login-form" autocomplete="on">
+    <h2 id="login-title">Вход</h2>
+    <p class="hint" id="login-hint">Введите пароль администратора.</p>
+    <div class="row">
+      <input type="password" id="login-pass" class="grow" placeholder="Пароль"
+             autocomplete="current-password" required>
+    </div>
+    <div class="row hidden" id="login-repeat-row" style="margin-top:8px">
+      <input type="password" id="login-pass2" class="grow" placeholder="Повторите пароль"
+             autocomplete="new-password">
+    </div>
+    <div class="row" style="margin-top:12px">
+      <button type="submit" class="btn primary grow" id="login-submit">Войти</button>
+    </div>
+  </form>
+</section>
+
+<!-- Основное приложение -->
+<div id="app" class="hidden">
+  <div class="chrome">
+  <header class="top">
+    <h1>Квас</h1>
+    <span class="version" id="hdr-version"></span>
+    <span class="spacer"></span>
+    <span class="badge" id="hdr-tunnel"><span class="dot"></span><span class="text">…</span></span>
+    <button class="btn small" id="btn-logout">Выйти</button>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" data-tab="overview" aria-selected="true">Обзор</button>
+    <button role="tab" data-tab="hosts" aria-selected="false">Домены</button>
+    <button role="tab" data-tab="tags" aria-selected="false">Закваски</button>
+    <button role="tab" data-tab="routes" aria-selected="false">Устройства</button>
+    <button role="tab" data-tab="adblock" aria-selected="false">Реклама</button>
+    <button role="tab" data-tab="settings" aria-selected="false">Настройки</button>
+  </nav>
+  </div>
+
+  <main>
+    <!-- Обзор -->
+    <section data-panel="overview">
+      <div class="card">
+        <h2>Состояние</h2>
+        <div class="grid-2" id="status-grid"></div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <h2>Обслуживание</h2>
+        <p class="hint">Долгие операции показывают ход выполнения прямо здесь.</p>
+        <div class="row">
+          <button class="btn" data-service="init">Пересобрать таблицы</button>
+          <button class="btn" data-service="update">Обновить списки</button>
+          <button class="btn" id="btn-backup">Резервная копия</button>
+        </div>
+        <pre class="log hidden" id="service-log"></pre>
+      </div>
+    </section>
+
+    <!-- Домены -->
+    <section data-panel="hosts" class="hidden">
+      <div class="card">
+        <h2>Добавить домен</h2>
+        <form class="row" id="host-add-form">
+          <input type="text" id="host-input" class="grow" placeholder="example.com"
+                 autocapitalize="none" autocorrect="off" spellcheck="false" required>
+          <button class="btn primary" type="submit">Добавить</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Массовый импорт</h2>
+        <p class="hint">По одному домену в строке. Ссылки и строки из hosts тоже подойдут.</p>
+        <textarea id="import-text" placeholder="youtube.com&#10;chatgpt.com"></textarea>
+        <div class="row" style="margin-top:10px">
+          <button class="btn primary" id="btn-import">Импортировать</button>
+          <a class="btn" href="/api/hosts/export" download="kvas.list">Скачать список</a>
+        </div>
+        <pre class="log hidden" id="import-log"></pre>
+      </div>
+
+      <div class="card">
+        <h2>Список <span class="version" id="hosts-count"></span></h2>
+        <div class="row" style="margin-bottom:10px">
+          <input type="search" id="host-filter" class="grow" placeholder="Поиск по списку"
+                 autocapitalize="none" autocorrect="off" spellcheck="false">
+        </div>
+        <div class="list" id="hosts-list"></div>
+      </div>
+    </section>
+
+    <!-- Закваски -->
+    <section data-panel="tags" class="hidden">
+      <div class="card">
+        <h2>Закваски</h2>
+        <p class="hint">Готовые наборы доменов. Включение добавляет все домены набора в список.</p>
+        <div class="list" id="tags-list"></div>
+      </div>
+    </section>
+
+    <!-- Устройства -->
+    <section data-panel="routes" class="hidden">
+      <div class="card">
+        <h2>Правило для устройства</h2>
+        <p class="hint">
+          «Весь трафик» — всё через туннель. «По списку» — только домены из списка.
+          «Мимо туннеля» — устройство всегда работает напрямую.
+        </p>
+        <form class="row" id="route-add-form">
+          <input type="text" id="route-ip" class="grow" placeholder="192.168.1.50" list="devices"
+                 autocapitalize="none" autocorrect="off" spellcheck="false" required>
+          <datalist id="devices"></datalist>
+          <select id="route-type" style="width:auto">
+            <option value="full">Весь трафик</option>
+            <option value="list">По списку</option>
+            <option value="exclude">Мимо туннеля</option>
+          </select>
+          <button class="btn primary" type="submit">Добавить</button>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Действующие правила</h2>
+        <div class="list" id="routes-list"></div>
+      </div>
+    </section>
+
+    <!-- Реклама -->
+    <section data-panel="adblock" class="hidden">
+      <div class="card">
+        <h2>Блокировка рекламы</h2>
+        <div class="switch">
+          <input type="checkbox" id="adblock-toggle">
+          <label class="track" for="adblock-toggle"></label>
+          <span id="adblock-state">…</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Заблокированные сайты</h2>
+        <p class="hint">Эти домены не откроются ни на одном устройстве сети.</p>
+        <form class="row" id="blocked-add-form" style="margin-bottom:10px">
+          <input type="text" id="blocked-input" class="grow" placeholder="example.com"
+                 autocapitalize="none" autocorrect="off" spellcheck="false" required>
+          <button class="btn primary" type="submit">Заблокировать</button>
+        </form>
+        <div class="list" id="blocked-list"></div>
+      </div>
+    </section>
+
+    <!-- Настройки -->
+    <section data-panel="settings" class="hidden">
+      <div class="card">
+        <h2>Смена пароля</h2>
+        <form id="password-form">
+          <div class="row"><input type="password" id="pass-current" class="grow"
+                 placeholder="Текущий пароль" autocomplete="current-password" required></div>
+          <div class="row" style="margin-top:8px"><input type="password" id="pass-new" class="grow"
+                 placeholder="Новый пароль" autocomplete="new-password" required></div>
+          <div class="row" style="margin-top:12px">
+            <button class="btn primary" type="submit">Сменить пароль</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Журнал веб-интерфейса</h2>
+        <div class="row" style="margin-bottom:10px">
+          <button class="btn" id="btn-logs">Обновить</button>
+        </div>
+        <pre class="log" id="logs-view">—</pre>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="toasts"></div>
+<script src="/app.js" type="module"></script>
+</body>
+</html>

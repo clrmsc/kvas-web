@@ -155,6 +155,16 @@ kvas uninstall yes           - удаление без вопроса
 kvas pause|freeze            - приостановка пакета
 kvas unpause|unfreeze        - возобновление работы
 
+== ВЕБ-ИНТЕРФЕЙС ==
+
+kvas web                     - запустить веб-интерфейс (порт 8085)
+kvas web status              - узнать, работает ли он
+kvas web restart             - перезапустить
+kvas web off                 - остановить
+
+Порт и сертификат TLS задаются в /opt/etc/kvas.conf
+(WEB_PORT, WEB_TLS_CERT, WEB_TLS_KEY).
+
 == OPKG ==
 
 opkg install <файл>.ipk     - установка пакета
@@ -172,3 +182,4 @@ kvas route add full 1.2.3.4 - всё от 1.2.3.4 в тоннель
 kvas route exclude 5.6.7.8  - исключить 5.6.7.8
 kvas route refresh          - применить маршруты
 kvas test                   - проверить работу пакета
+kvas web                     - открыть управление в браузере

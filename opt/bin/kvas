@@ -160,7 +160,9 @@ case "${1}" in
 		cp -f "$ADGUARDHOME_CONFIG" "$BKPDIR/" 2>/dev/null
 		cp -f "$ADGUARD_IPSET_FILE" "$BKPDIR/" 2>/dev/null
 		cp -f "$VLESS_CONFIG_FILE" "$BKPDIR/" 2>/dev/null
-		[ -f "$KVAS_WEB_PASS" ] && cp -f "$KVAS_WEB_PASS" "$BKPDIR/" 2>/dev/null
+		# Пароль веб-интерфейса лежит в отдельном каталоге, поэтому в архиве
+		# ему даётся говорящее имя.
+		[ -f "$KVAS_WEB_PASS" ] && cp -f "$KVAS_WEB_PASS" "$BKPDIR/kvas_web_password" 2>/dev/null
 		[ -f /opt/apps/kvas/hysteria/bin/hysteria ] && cp -f /opt/apps/kvas/hysteria/bin/hysteria "$BKPDIR/"
 		echo "Резервная копия сохранена: $BKPDIR"
 		;;
@@ -175,7 +177,8 @@ case "${1}" in
 			_b="${BKP}/$(basename $_f)"
 			[ -f "$_b" ] && cp -f "$_b" "$_f" 2>/dev/null && echo "Восстановлен: $(basename $_f)"
 		done
-		_f="$KVAS_WEB_PASS"; _b="${BKP}/$(basename $_f)"; [ -f "$_b" ] && cp -f "$_b" "$_f" 2>/dev/null && echo "Восстановлен: $(basename $_f)"
+		_b="${BKP}/kvas_web_password"
+		[ -f "$_b" ] && mkdir -p "$(dirname "$KVAS_WEB_PASS")" && cp -f "$_b" "$KVAS_WEB_PASS" 2>/dev/null && chmod 600 "$KVAS_WEB_PASS" && echo "Восстановлен: пароль веб-интерфейса"
 		[ -f "${BKP}/hysteria" ] && cp -f "${BKP}/hysteria" /opt/apps/kvas/hysteria/bin/hysteria 2>/dev/null && chmod 755 /opt/apps/kvas/hysteria/bin/hysteria && echo "Восстановлен бинарник hysteria"
 		;;
 
@@ -481,11 +484,22 @@ case "${1}" in
 	                      [ -n "${2}" ] && exit 0
 	;;
 
+	# Веб-интерфейс: kvas web [on|off|status|restart]
+	web)
+		case "${2}" in
+			stop|off)         cmd_monitor_web_stop ;;
+			status)           cmd_monitor_web_status ;;
+			restart)          cmd_monitor_web_stop; cmd_monitor_web_start ;;
+			*)                cmd_monitor_web_start ;;
+		esac
+		;;
+
 	monitor|monitoring)
 		case "${2}" in
 			web)
 				case "${3}" in
 					stop|off) cmd_monitor_web_stop ;;
+					status)   cmd_monitor_web_status ;;
 					*)        cmd_monitor_web_start ;;
 				esac ;;
 			start|on)  cmd_monitor_web_start ;;

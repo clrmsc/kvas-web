@@ -70,8 +70,10 @@ HYSTERIA_CONFIG_BACKUP=${KVAS_BACKUP_PATH}/hysteria_config.yaml
 HYSTERIA_ENV_FILE=/opt/apps/kvas/hysteria/etc/conf/env.sh
 HYSTERIA_ENV_BACKUP=${KVAS_BACKUP_PATH}/hysteria_env.sh
 
-KVAS_WEB_PASS=/opt/kvas_web_pass
-KVAS_WEB_PASS_BACKUP=${KVAS_BACKUP_PATH}/kvas_web_pass
+# Состояние веб-интерфейса: хэш пароля администратора и активные сессии.
+KVAS_WEB_STATE_DIR=/opt/etc/kvas-web
+KVAS_WEB_PASS=${KVAS_WEB_STATE_DIR}/password
+KVAS_WEB_PASS_BACKUP=${KVAS_BACKUP_PATH}/kvas_web_password
 
 ADGUARDHOME_LOG=/opt/var/log/AdGuardHome.log
 ADGUARDHOME_DEMON=/opt/etc/init.d/S99adguardhome

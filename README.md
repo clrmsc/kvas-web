@@ -1,3 +1,13 @@
+> ## Это форк
+>
+> Форк [qzeleza/kvas](https://github.com/qzeleza/kvas) (Apache 2.0), отделившийся
+> на версии `1.1.9-beta-10`. Отличие от оригинала — веб-интерфейс: вместо
+> HTTP-сервера на socat с обработчиками на shell здесь один статический
+> бинарник на Go со вшитым интерфейсом, нормальной аутентификацией и защитой
+> от инъекций. Подробности — в [web/README.md](web/README.md).
+>
+> Открыть после установки: `http://<адрес роутера>:8085/` (`kvas web`).
+
 ![GitHub Repo stars](https://img.shields.io/github/stars/qzeleza/kvas?color=orange) ![GitHub closed issues](https://img.shields.io/github/issues-closed/qzeleza/kvas?color=success) ![GitHub last commit](https://img.shields.io/github/last-commit/qzeleza/kvas) ![GitHub commit activity](https://img.shields.io/github/commit-activity/y/qzeleza/kvas) ![GitHub top language](https://img.shields.io/github/languages/top/qzeleza/kvas) ![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/qzeleza/kvas) 
 # [КВАС](https://forum.keenetic.com/topic/14415-пробуем-квас-shadowsocks-и-другие-vpn-клиенты) - защита ваших подключений #
 

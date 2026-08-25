@@ -1,0 +1,39 @@
+#!/bin/sh
+
+#------------------------------------------------------------------------------
+#
+#	ВЕБ-ИНТЕРФЕЙС КВАСА
+#
+#	Запускает kvasweb — единый бинарник, который отдаёт веб-интерфейс и
+#	управляет Квасом через его CLI. Порт и параметры TLS берутся из
+#	/opt/etc/kvas.conf (ключи WEB_PORT, WEB_TLS_CERT, WEB_TLS_KEY).
+#
+#	Лицензия: Apache License 2.0
+#------------------------------------------------------------------------------
+
+ENABLED=yes
+PROCS=/opt/apps/kvas/bin/kvasweb
+DESC="Веб-интерфейс Кваса"
+PATH=/opt/sbin:/opt/bin:/opt/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+KVAS_CONF=/opt/etc/kvas.conf
+
+_conf_value() {
+	[ -f "${KVAS_CONF}" ] || return 0
+	grep "^${1}=" "${KVAS_CONF}" 2>/dev/null | tail -1 | cut -d= -f2-
+}
+
+WEB_PORT="$(_conf_value WEB_PORT)"
+[ -z "${WEB_PORT}" ] && WEB_PORT=8085
+
+WEB_TLS_CERT="$(_conf_value WEB_TLS_CERT)"
+WEB_TLS_KEY="$(_conf_value WEB_TLS_KEY)"
+
+ARGS="-listen 0.0.0.0:${WEB_PORT}"
+if [ -n "${WEB_TLS_CERT}" ] && [ -n "${WEB_TLS_KEY}" ]; then
+	ARGS="${ARGS} -tls-cert ${WEB_TLS_CERT} -tls-key ${WEB_TLS_KEY}"
+fi
+
+PREARGS=""
+
+. /opt/etc/init.d/rc.func
