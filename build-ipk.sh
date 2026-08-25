@@ -148,6 +148,42 @@ def raw_headers(data):
     return types
 
 
+# Файлы, которых в пакете нет намеренно.
+SOURCE_EXCEPTIONS = {
+    # Создаётся postinst копированием из etc/ndm/ndm.
+    "/opt/apps/kvas/bin/libs/ndm",
+    # Отладочный остаток апстрима в неиспользуемой функции.
+    "/opt/apps/kvas/.env",
+}
+
+
+def check_sourced_files(data, names):
+    """Ищет `. /opt/apps/kvas/...` в скриптах пакета и сверяет со списком файлов.
+
+    В репозитории апстрима часть подключаемых файлов отсутствует — они
+    появляются только в его сборках. Пакет с такой дырой ставится без
+    единой жалобы, а CLI падает на первой же команде.
+    """
+    import re
+
+    found = []
+    pattern = re.compile(rb"^\s*\.\s+(/opt/apps/kvas/[^\s\"\';|)]+)", re.MULTILINE)
+    with tarfile.open(fileobj=io.BytesIO(data)) as tf:
+        for member in tf.getmembers():
+            if not member.isfile() or member.size > 1 << 20:
+                continue
+            content = tf.extractfile(member).read()
+            if not content.startswith(b"#!") and b"/opt/apps/kvas" not in content[:200]:
+                continue
+            for match in pattern.findall(content):
+                path = match.decode("utf-8", "replace")
+                if path in SOURCE_EXCEPTIONS:
+                    continue
+                if "." + path not in names:
+                    found.append(f"{member.name} подключает {path}, которого нет в пакете")
+    return sorted(set(found))
+
+
 def check(data, label):
     for typeflag, name in raw_headers(data):
         if typeflag in ("x", "g"):
@@ -180,6 +216,7 @@ with tarfile.open(fileobj=io.BytesIO(outer_data)) as outer:
             for required in ("./opt/apps/kvas/bin/kvas", "./opt/apps/kvas/bin/kvasweb"):
                 if required not in inner_names:
                     problems.append(f"в data.tar.gz нет {required}")
+            problems.extend(check_sourced_files(inner_data, inner_names))
 
 if problems:
     print("\n".join(f"  ОШИБКА: {p}" for p in problems), file=sys.stderr)
