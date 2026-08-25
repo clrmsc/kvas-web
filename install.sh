@@ -74,6 +74,11 @@ if [ -x /opt/apps/kvas/bin/kvas ]; then
 	say "Квас уже установлен — сохраняем настройки..."
 	/opt/apps/kvas/bin/kvas backup >/dev/null 2>&1 || say "  (резервную копию сделать не удалось, продолжаем)"
 	[ -x /opt/etc/init.d/S99kvasweb ] && /opt/etc/init.d/S99kvasweb stop >/dev/null 2>&1
+elif opkg list-installed 2>/dev/null | grep -q "^kvas "; then
+	# Пакет числится установленным, а файлов нет: следы неудачной установки.
+	# opkg откажется ставить поверх, поэтому сначала убираем запись.
+	say "Найдена неполная установка — убираем её..."
+	opkg remove kvas --force-depends >/dev/null 2>&1 || true
 fi
 
 # ------------------------------------------------------------------
@@ -106,6 +111,28 @@ fi
 rm -f "${TMP_IPK}"
 
 # ------------------------------------------------------------------
+# Проверка установки
+#
+# opkg сообщает об успехе даже когда распаковка провалилась, поэтому
+# смотрим на файлы, а не на код возврата.
+# ------------------------------------------------------------------
+
+for required in /opt/apps/kvas/bin/kvas /opt/apps/kvas/bin/kvasweb /opt/etc/init.d/S99kvasweb; do
+	[ -f "${required}" ] || fail "установка прошла не полностью: нет ${required}.
+Посмотрите сообщения opkg выше и повторите установку."
+done
+
+chmod 755 /opt/apps/kvas/bin/kvasweb /opt/etc/init.d/S99kvasweb 2>/dev/null || true
+
+/opt/apps/kvas/bin/kvasweb -version >/dev/null 2>&1 \
+	|| fail "веб-интерфейс не запускается на этом роутере — возможно, скачан пакет не той архитектуры"
+
+# Веб-интерфейс поднимается из postinst; если он не стартовал, пробуем ещё раз.
+if ! /opt/etc/init.d/S99kvasweb check >/dev/null 2>&1; then
+	/opt/etc/init.d/S99kvasweb start >/dev/null 2>&1 || true
+fi
+
+# ------------------------------------------------------------------
 # Итог
 # ------------------------------------------------------------------
 
@@ -124,6 +151,12 @@ say "     Мастер спросит про интерфейс VPN и вклю�
 say ""
 say "  2. Откройте в браузере:  ${BLUE}http://${IP}:${PORT}/${NOCL}"
 say "     При первом входе задайте пароль администратора."
+say ""
+if /opt/etc/init.d/S99kvasweb check >/dev/null 2>&1; then
+	say "  Веб-интерфейс уже работает."
+else
+	say "  ${RED}Веб-интерфейс не запустился${NOCL} — посмотрите /opt/var/log/kvas-web.log"
+fi
 say ""
 say "  Управление веб-интерфейсом:  ${BLUE}kvas web {status|restart|off}${NOCL}"
 say "  Журнал:                      ${BLUE}/opt/var/log/kvas-web.log${NOCL}"
