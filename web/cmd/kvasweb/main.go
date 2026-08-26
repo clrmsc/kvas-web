@@ -34,19 +34,31 @@ func main() {
 }
 
 func run(args []string) error {
+	checkOnly := false
+	filtered := make([]string, 0, len(args))
 	for _, a := range args {
-		if a == "-version" || a == "--version" {
+		switch a {
+		case "-version", "--version":
 			fmt.Println("kvasweb", version)
 			return nil
+		case "-check", "--check":
+			// Диагностический режим: проверить серверы подписки и выйти.
+			// Нужен, чтобы не дожидаться суточной проверки при отладке.
+			checkOnly = true
+		default:
+			filtered = append(filtered, a)
 		}
 	}
+	args = filtered
 
 	cfg, err := config.FromFlags(args)
 	if err != nil {
 		return err
 	}
 
-	logger, closeLog, err := newLogger(cfg.LogFile)
+	// В диагностическом режиме журнал идёт только в файл: иначе его строки
+	// перемешиваются с таблицей результатов.
+	logger, closeLog, err := newLogger(cfg.LogFile, !checkOnly)
 	if err != nil {
 		return err
 	}
@@ -60,6 +72,10 @@ func run(args []string) error {
 	av, err := autovpn.New(cfg, logger)
 	if err != nil {
 		return fmt.Errorf("не удалось подготовить подписку: %w", err)
+	}
+
+	if checkOnly {
+		return runCheck(av)
 	}
 
 	srv := &http.Server{
@@ -118,10 +134,13 @@ func run(args []string) error {
 	return srv.Shutdown(shutdownCtx)
 }
 
-// newLogger пишет и в файл, и в стандартный вывод: файл нужен веб-странице
-// журнала, вывод — при запуске вручную из консоли.
-func newLogger(path string) (*slog.Logger, func(), error) {
-	writers := []io.Writer{os.Stdout}
+// newLogger пишет в файл, а при toStdout — ещё и в стандартный вывод:
+// файл нужен веб-странице журнала, вывод — при запуске вручную из консоли.
+func newLogger(path string, toStdout bool) (*slog.Logger, func(), error) {
+	var writers []io.Writer
+	if toStdout {
+		writers = append(writers, os.Stdout)
+	}
 	closeFn := func() {}
 
 	if path != "" {
@@ -134,6 +153,59 @@ func newLogger(path string) (*slog.Logger, func(), error) {
 		}
 	}
 
+	if len(writers) == 0 {
+		writers = append(writers, io.Discard)
+	}
 	h := slog.NewTextHandler(io.MultiWriter(writers...), &slog.HandlerOptions{Level: slog.LevelInfo})
 	return slog.New(h), closeFn, nil
+}
+
+// runCheck выполняет одну проверку серверов подписки и печатает итог.
+// Автоприменение при этом работает так же, как по расписанию.
+func runCheck(av *autovpn.Manager) error {
+	if !av.State().Configured() {
+		return fmt.Errorf("подписка не настроена — задайте ссылку в веб-интерфейсе")
+	}
+
+	run, err := av.StartCheck()
+	if err != nil {
+		return err
+	}
+	for res := range run.Events {
+		switch {
+		case res.Error != "":
+			fmt.Printf("%-34s недоступен: %s\n", trim(res.Name, 34), res.Error)
+		case res.Speed > 0:
+			stale := ""
+			if res.SpeedStale {
+				stale = " (прошлый замер)"
+			}
+			fmt.Printf("%-34s %5.0f мс  %6.1f Мбит/с%s\n", trim(res.Name, 34), res.Latency, res.Speed, stale)
+		case res.SpeedError != "":
+			fmt.Printf("%-34s %5.0f мс  замер скорости не удался: %s\n",
+				trim(res.Name, 34), res.Latency, res.SpeedError)
+		default:
+			fmt.Printf("%-34s %5.0f мс\n", trim(res.Name, 34), res.Latency)
+		}
+	}
+
+	st := av.State()
+	fmt.Println()
+	if st.LastError != "" {
+		fmt.Println("ошибка:", st.LastError)
+	}
+	if st.ActiveName != "" {
+		fmt.Println("активный сервер:", st.ActiveName)
+	}
+	return nil
+}
+
+// trim обрезает строку по числу рун, чтобы таблица не разъезжалась
+// на именах с флагами и кириллицей.
+func trim(s string, limit int) string {
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+	return string(runes[:limit-1]) + "…"
 }

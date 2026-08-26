@@ -2,7 +2,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=kvas
 PKG_VERSION:=1.1.9_beta-10
-PKG_RELEASE:= 27
+PKG_RELEASE:= 32
 PKG_BUILD_DIR:=$(BUILD_DIR)/$(PKG_NAME)-$(PKG_VERSION)-$(PKG_RELEASE)
 
 # Веб-интерфейс — отдельный статический бинарник, который собирается заранее
@@ -135,8 +135,12 @@ define Package/kvas/postrm
 
 #!/bin/sh
 
-# Пароль и сессии веб-интерфейса не нужны после удаления пакета.
-rm -rf /opt/etc/kvas-web
+# Состояние веб-интерфейса (пароль, подписка) намеренно остаётся на месте:
+# opkg вызывает postrm и при обновлении пакета, а не только при удалении,
+# поэтому удаление здесь стирало бы настройки на каждом обновлении.
+# Чтобы убрать их полностью: rm -rf /opt/etc/kvas-web
+
+exit 0
 
 endef
 

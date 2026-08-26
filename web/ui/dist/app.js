@@ -430,10 +430,10 @@ function renderSubResults(results) {
       metrics = `<span style="color:var(--err)">${esc(shortError(r.error))}</span>`;
     } else {
       const speed = r.speed_mbps
-        ? `${r.speed_mbps.toFixed(1)} Мбит/с`
+        ? `${r.speed_mbps.toFixed(1)} Мбит/с${r.speed_stale ? ' (прошлый замер)' : ''}`
         : r.speed_error
           ? `скорость не измерена: ${esc(shortError(r.speed_error))}`
-          : 'скорость не мерили';
+          : 'скорость ещё не мерили';
       metrics = `${Math.round(r.latency_ms)} мс · ${speed}`;
     }
 

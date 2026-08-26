@@ -206,8 +206,15 @@ func (m *Manager) runCheck(ctx context.Context, onResult func(probe.Result)) ([]
 	opt.SpeedTestURL = m.cfg.SpeedTestURL
 	opt.SpeedTopN = st.SpeedTopN
 
+	// Прошлые замеры скорости передаём в проверку: они задают, у кого
+	// мерить в этот раз, и сохраняются для остальных серверов.
+	prev := make(map[string]probe.Result, len(st.Results))
+	for _, r := range st.Results {
+		prev[r.Key] = r
+	}
+
 	m.log.Info("проверка серверов подписки началась", "серверов", len(servers))
-	results := probe.CheckAll(ctx, servers, opt, onResult)
+	results := probe.CheckAll(ctx, servers, opt, prev, onResult)
 	probe.Sort(results)
 
 	m.mu.Lock()
@@ -235,12 +242,54 @@ func (m *Manager) runCheck(ctx context.Context, onResult func(probe.Result)) ([]
 		m.log.Info("лучший сервер уже используется", "сервер", results[0].Name)
 		return results, nil
 	}
+	if keep, reason := keepCurrent(results, stateCopy.ActiveKey); keep {
+		m.log.Info("остаёмся на текущем сервере", "сервер", stateCopy.ActiveName, "причина", reason)
+		return results, nil
+	}
 	if err := m.Apply(ctx, results[0].Key); err != nil {
 		m.log.Error("не удалось переключиться на лучший сервер",
 			"сервер", results[0].Name, "err", err)
 		m.recordError(err)
 	}
 	return results, nil
+}
+
+// switchGain — насколько лучший сервер должен превосходить текущий, чтобы
+// переключение имело смысл. Без запаса туннель дёргался бы каждую ночь
+// между серверами, отличающимися на пару процентов.
+const switchGain = 1.15
+
+// keepCurrent решает, стоит ли остаться на текущем сервере: если он
+// по-прежнему доступен и почти не хуже лучшего, переключение только зря
+// рвёт соединения.
+func keepCurrent(results []probe.Result, activeKey string) (bool, string) {
+	if activeKey == "" {
+		return false, ""
+	}
+	var active *probe.Result
+	for i := range results {
+		if results[i].Key == activeKey {
+			active = &results[i]
+			break
+		}
+	}
+	if active == nil || !active.Alive() {
+		return false, ""
+	}
+
+	best := results[0]
+	// Скорость известна у обоих — сравниваем её с запасом.
+	if best.Speed > 0 && active.Speed > 0 {
+		if best.Speed < active.Speed*switchGain {
+			return true, "выигрыш по скорости меньше 15%"
+		}
+		return false, ""
+	}
+	// Скорости нет — сравниваем задержку, тоже с запасом.
+	if active.Latency > 0 && best.Latency > 0 && best.Latency > active.Latency/switchGain {
+		return true, "выигрыш по задержке незначителен"
+	}
+	return false, ""
 }
 
 // Apply переключает Квас на сервер с указанным ключом (адрес:порт).

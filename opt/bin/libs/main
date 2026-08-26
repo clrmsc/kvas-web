@@ -74,6 +74,8 @@ HYSTERIA_ENV_BACKUP=${KVAS_BACKUP_PATH}/hysteria_env.sh
 KVAS_WEB_STATE_DIR=/opt/etc/kvas-web
 KVAS_WEB_PASS=${KVAS_WEB_STATE_DIR}/password
 KVAS_WEB_PASS_BACKUP=${KVAS_BACKUP_PATH}/kvas_web_password
+KVAS_WEB_SUBSCRIPTION=${KVAS_WEB_STATE_DIR}/subscription.json
+KVAS_WEB_SUBSCRIPTION_BACKUP=${KVAS_BACKUP_PATH}/kvas_web_subscription.json
 
 ADGUARDHOME_LOG=/opt/var/log/AdGuardHome.log
 ADGUARDHOME_DEMON=/opt/etc/init.d/S99adguardhome

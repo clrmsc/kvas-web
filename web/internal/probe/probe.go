@@ -10,8 +10,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 
+	"github.com/clrmsc/kvas-web/web/internal/kvas"
 	"github.com/clrmsc/kvas-web/web/internal/subscription"
 )
 
@@ -29,6 +32,9 @@ type Result struct {
 	// остаётся пригодным: он ответил на проверку задержки, а замер мог
 	// сорваться из-за отсутствия xray или недоступности тестового файла.
 	SpeedError string `json:"speed_error,omitempty"`
+	// SpeedStale означает, что скорость взята из прошлой проверки: за один
+	// раз она измеряется лишь у части серверов.
+	SpeedStale bool   `json:"speed_stale,omitempty"`
 	Checked    string `json:"checked_at"`
 }
 
@@ -124,8 +130,11 @@ func Speed(ctx context.Context, s subscription.Server, opt Options) (float64, er
 	defer cancel()
 
 	cmd := exec.CommandContext(runCtx, opt.XrayBin, "run", "-c", tmp.Name())
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	// Вывод xray сохраняем: без него причина сорвавшегося замера выглядит
+	// как безликий обрыв соединения с локальным портом.
+	var xrayOut boundedBuffer
+	cmd.Stdout = &xrayOut
+	cmd.Stderr = &xrayOut
 	// Убиваем всё дерево процессов: xray не должен пережить проверку.
 	cmd.WaitDelay = 3 * time.Second
 	if err := cmd.Start(); err != nil {
@@ -138,10 +147,82 @@ func Speed(ctx context.Context, s subscription.Server, opt Options) (float64, er
 
 	proxyAddr := net.JoinHostPort(cfgOpt.ListenIP, fmt.Sprint(port))
 	if err := waitForPort(runCtx, proxyAddr, 5*time.Second); err != nil {
-		return 0, fmt.Errorf("туннель не поднялся: %w", err)
+		return 0, fmt.Errorf("туннель не поднялся: %w%s", err, xrayOut.suffix())
 	}
 
-	return download(runCtx, proxyAddr, opt)
+	// Разовый обрыв на первом соединении — обычное дело: сервер может
+	// отбить первую попытку, пока туннель прогревается. Пробуем дважды.
+	var lastErr error
+	for attempt := 1; attempt <= 2; attempt++ {
+		mbps, err := download(runCtx, proxyAddr, opt)
+		if err == nil {
+			return mbps, nil
+		}
+		lastErr = err
+		if runCtx.Err() != nil {
+			break
+		}
+	}
+	return 0, fmt.Errorf("%w%s", lastErr, xrayOut.suffix())
+}
+
+// boundedBuffer собирает начало вывода команды: полный лог xray в сообщении
+// об ошибке не нужен, а первые строки обычно и содержат причину.
+type boundedBuffer struct {
+	mu   sync.Mutex
+	data []byte
+}
+
+const boundedBufferLimit = 2048
+
+func (b *boundedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if free := boundedBufferLimit - len(b.data); free > 0 {
+		if len(p) < free {
+			free = len(p)
+		}
+		b.data = append(b.data, p[:free]...)
+	}
+	return len(p), nil
+}
+
+// suffix возвращает вывод xray в виде добавки к сообщению об ошибке.
+// Из всего вывода берутся строки, похожие на жалобы: баннер версии и
+// сообщения [Info] о принятых соединениях ничего не объясняют.
+func (b *boundedBuffer) suffix() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	text := kvas.StripANSI(string(b.data))
+	if text == "" {
+		return ""
+	}
+
+	var interesting []string
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.Contains(line, "[Info]") {
+			continue
+		}
+		if strings.Contains(line, "[Warning]") || strings.Contains(line, "[Error]") ||
+			strings.Contains(line, "failed") || strings.Contains(line, "rejected") ||
+			strings.Contains(line, "timeout") {
+			interesting = append(interesting, line)
+		}
+	}
+	if len(interesting) == 0 {
+		return ""
+	}
+
+	// Последние жалобы содержательнее первых: к концу видно, на чём всё встало.
+	if len(interesting) > 2 {
+		interesting = interesting[len(interesting)-2:]
+	}
+	joined := strings.Join(strings.Fields(strings.Join(interesting, " ")), " ")
+	if len(joined) > 240 {
+		joined = joined[len(joined)-240:]
+	}
+	return " (xray: " + joined + ")"
 }
 
 // download качает тестовый файл через прокси и считает скорость.
@@ -215,9 +296,14 @@ func Sort(results []Result) {
 	sort.SliceStable(results, func(i, j int) bool { return Better(results[i], results[j]) })
 }
 
+// latencySignificance — с какой разницы задержка вообще о чём-то говорит.
+// У провайдеров с близкими точками входа все серверы отвечают за 2–4 мс,
+// и такие различия — шум измерения, а не свойство сервера.
+const latencySignificance = 10 // мс
+
 // Better сравнивает два результата. Скорость важнее задержки, но при
-// близкой скорости (разница до 15%) выигрывает более отзывчивый сервер:
-// для мессенджеров и веб-страниц это заметнее лишних мегабит.
+// близкой скорости (разница до 15%) выигрывает более отзывчивый сервер —
+// если его отзывчивость отличается ощутимо, а не на доли миллисекунды.
 func Better(a, b Result) bool {
 	if a.Alive() != b.Alive() {
 		return a.Alive()
@@ -238,7 +324,14 @@ func Better(a, b Result) bool {
 		fast, slow = slow, fast
 	}
 	if slow >= fast*0.85 {
-		return a.Latency < b.Latency
+		diff := a.Latency - b.Latency
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff >= latencySignificance {
+			return a.Latency < b.Latency
+		}
+		// Задержки неотличимы — решает скорость, пусть и с малым отрывом.
 	}
 	return a.Speed > b.Speed
 }

@@ -160,9 +160,10 @@ case "${1}" in
 		cp -f "$ADGUARDHOME_CONFIG" "$BKPDIR/" 2>/dev/null
 		cp -f "$ADGUARD_IPSET_FILE" "$BKPDIR/" 2>/dev/null
 		cp -f "$VLESS_CONFIG_FILE" "$BKPDIR/" 2>/dev/null
-		# Пароль веб-интерфейса лежит в отдельном каталоге, поэтому в архиве
-		# ему даётся говорящее имя.
+		# Пароль и настройки веб-интерфейса лежат в отдельном каталоге,
+		# поэтому в архиве им даются говорящие имена.
 		[ -f "$KVAS_WEB_PASS" ] && cp -f "$KVAS_WEB_PASS" "$BKPDIR/kvas_web_password" 2>/dev/null
+		[ -f "$KVAS_WEB_SUBSCRIPTION" ] && cp -f "$KVAS_WEB_SUBSCRIPTION" "$BKPDIR/kvas_web_subscription.json" 2>/dev/null
 		[ -f /opt/apps/kvas/hysteria/bin/hysteria ] && cp -f /opt/apps/kvas/hysteria/bin/hysteria "$BKPDIR/"
 		echo "Резервная копия сохранена: $BKPDIR"
 		;;
@@ -179,6 +180,8 @@ case "${1}" in
 		done
 		_b="${BKP}/kvas_web_password"
 		[ -f "$_b" ] && mkdir -p "$(dirname "$KVAS_WEB_PASS")" && cp -f "$_b" "$KVAS_WEB_PASS" 2>/dev/null && chmod 600 "$KVAS_WEB_PASS" && echo "Восстановлен: пароль веб-интерфейса"
+		_b="${BKP}/kvas_web_subscription.json"
+		[ -f "$_b" ] && mkdir -p "$(dirname "$KVAS_WEB_SUBSCRIPTION")" && cp -f "$_b" "$KVAS_WEB_SUBSCRIPTION" 2>/dev/null && chmod 600 "$KVAS_WEB_SUBSCRIPTION" && echo "Восстановлены: настройки подписки"
 		[ -f "${BKP}/hysteria" ] && cp -f "${BKP}/hysteria" /opt/apps/kvas/hysteria/bin/hysteria 2>/dev/null && chmod 755 /opt/apps/kvas/hysteria/bin/hysteria && echo "Восстановлен бинарник hysteria"
 		;;
 

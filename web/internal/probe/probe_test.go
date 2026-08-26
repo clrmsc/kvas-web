@@ -217,3 +217,55 @@ func TestSpeedErrorKeepsServerAlive(t *testing.T) {
 		t.Error("сервер без замера скорости лучше недоступного")
 	}
 }
+
+func TestSpeedCandidatesPrefersUnmeasured(t *testing.T) {
+	results := []Result{
+		{Key: "a", Latency: 3, Speed: 100}, // быстрый, уже известен
+		{Key: "b", Latency: 5},             // скорость неизвестна
+		{Key: "c", Latency: 2, Speed: 10},  // известен, медленный
+		{Key: "d", Latency: 9},             // скорость неизвестна, отзывчивость хуже
+		{Key: "e", Error: "нет связи"},     // недоступен
+	}
+
+	got := speedCandidates(results, 3)
+	if len(got) != 3 {
+		t.Fatalf("выбрано %d серверов, ожидалось 3", len(got))
+	}
+	// Сначала неизмеренные (b, затем d по задержке), потом самый быстрый из известных.
+	if results[got[0]].Key != "b" || results[got[1]].Key != "d" {
+		t.Errorf("первыми должны идти серверы без замера, получено %s, %s",
+			results[got[0]].Key, results[got[1]].Key)
+	}
+	if results[got[2]].Key != "a" {
+		t.Errorf("третьим должен быть самый быстрый из известных, получено %s", results[got[2]].Key)
+	}
+	for _, idx := range got {
+		if results[idx].Key == "e" {
+			t.Error("недоступный сервер не должен попадать в замер")
+		}
+	}
+}
+
+func TestSpeedCandidatesSkipsDeadOnly(t *testing.T) {
+	results := []Result{{Key: "a", Error: "нет связи"}, {Key: "b", Error: "нет связи"}}
+	if got := speedCandidates(results, 5); len(got) != 0 {
+		t.Errorf("для недоступных серверов список должен быть пуст, получено %v", got)
+	}
+}
+
+func TestBetterIgnoresNoiseLatency(t *testing.T) {
+	// Провайдер с близкими точками входа: задержки у всех 2–4 мс, разница
+	// между ними ничего не значит, и решать должна скорость.
+	faster := Result{Latency: 3, Speed: 137}
+	slower := Result{Latency: 3, Speed: 120}
+	if !Better(faster, slower) {
+		t.Error("при неотличимых задержках должен выигрывать более быстрый сервер")
+	}
+
+	// А вот разница в десятки миллисекунд — уже свойство канала.
+	nearby := Result{Latency: 20, Speed: 120}
+	distant := Result{Latency: 200, Speed: 137}
+	if !Better(nearby, distant) {
+		t.Error("при заметной разнице задержек должен выигрывать отзывчивый сервер")
+	}
+}

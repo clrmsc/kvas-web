@@ -2,6 +2,7 @@ package probe
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 
@@ -13,9 +14,15 @@ import (
 const latencyWorkers = 4
 
 // CheckAll проверяет все серверы подписки: сначала задержку до каждого,
-// затем скорость у лучших по задержке. Промежуточные результаты
-// отдаются через onResult, чтобы интерфейс показывал ход проверки.
-func CheckAll(ctx context.Context, servers []subscription.Server, opt Options, onResult func(Result)) []Result {
+// затем скорость у части из них. Промежуточные результаты отдаются через
+// onResult, чтобы интерфейс показывал ход проверки.
+//
+// prev — результаты прошлой проверки по ключу сервера. Они нужны дважды:
+// чтобы в первую очередь мерить скорость там, где её ещё не знаем, и чтобы
+// не терять уже известные значения для остальных серверов.
+func CheckAll(ctx context.Context, servers []subscription.Server, opt Options,
+	prev map[string]Result, onResult func(Result)) []Result {
+
 	now := func() string { return time.Now().Format(time.RFC3339) }
 
 	results := make([]Result, len(servers))
@@ -42,6 +49,13 @@ func CheckAll(ctx context.Context, servers []subscription.Server, opt Options, o
 				r.Error = err.Error()
 			} else {
 				r.Latency = float64(latency.Microseconds()) / 1000
+				// Пока скорость не измерена в этот раз, показываем прошлую:
+				// иначе сервер выглядел бы худшим просто потому, что до него
+				// не дошла очередь.
+				if old, ok := prev[r.Key]; ok && old.Speed > 0 {
+					r.Speed = old.Speed
+					r.SpeedStale = true
+				}
 			}
 
 			mu.Lock()
@@ -60,7 +74,7 @@ func CheckAll(ctx context.Context, servers []subscription.Server, opt Options, o
 
 	// Скорость меряем последовательно: каждая проверка поднимает свой xray,
 	// и параллельные замеры мешали бы друг другу делить канал.
-	for _, idx := range topAlive(results, opt.SpeedTopN) {
+	for _, idx := range speedCandidates(results, opt.SpeedTopN) {
 		if ctx.Err() != nil {
 			break
 		}
@@ -72,6 +86,7 @@ func CheckAll(ctx context.Context, servers []subscription.Server, opt Options, o
 			results[idx].SpeedError = err.Error()
 		} else {
 			results[idx].Speed = speed
+			results[idx].SpeedStale = false
 			results[idx].SpeedError = ""
 		}
 		results[idx].Checked = now()
@@ -84,29 +99,51 @@ func CheckAll(ctx context.Context, servers []subscription.Server, opt Options, o
 	return results
 }
 
-// topAlive возвращает индексы n самых отзывчивых доступных серверов.
-func topAlive(results []Result, n int) []int {
-	type pair struct {
+// speedCandidates выбирает, у каких серверов мерить скорость.
+//
+// Сначала идут те, о чьей скорости ничего не известно, — от самых
+// отзывчивых. Затем самые быстрые по прошлым замерам: их стоит перемерить,
+// потому что именно из них выбирается рабочий сервер. Так за несколько
+// суточных проверок охватываются все серверы подписки, даже когда задержки
+// у них одинаковые и ранжировать по ним нечего.
+func speedCandidates(results []Result, n int) []int {
+	type candidate struct {
 		idx     int
 		latency float64
+		speed   float64
+		known   bool
 	}
-	var alive []pair
+
+	var alive []candidate
 	for i, r := range results {
-		if r.Alive() {
-			alive = append(alive, pair{i, r.Latency})
+		if !r.Alive() {
+			continue
 		}
+		alive = append(alive, candidate{
+			idx:     i,
+			latency: r.Latency,
+			speed:   r.Speed,
+			known:   r.Speed > 0,
+		})
 	}
-	for i := 1; i < len(alive); i++ {
-		for j := i; j > 0 && alive[j].latency < alive[j-1].latency; j-- {
-			alive[j], alive[j-1] = alive[j-1], alive[j]
+
+	sort.SliceStable(alive, func(i, j int) bool {
+		a, b := alive[i], alive[j]
+		if a.known != b.known {
+			return !a.known // неизвестные — вперёд
 		}
-	}
+		if a.known {
+			return a.speed > b.speed
+		}
+		return a.latency < b.latency
+	})
+
 	if n > 0 && len(alive) > n {
 		alive = alive[:n]
 	}
 	idx := make([]int, 0, len(alive))
-	for _, p := range alive {
-		idx = append(idx, p.idx)
+	for _, c := range alive {
+		idx = append(idx, c.idx)
 	}
 	return idx
 }

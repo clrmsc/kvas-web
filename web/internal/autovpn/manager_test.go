@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/clrmsc/kvas-web/web/internal/config"
+	"github.com/clrmsc/kvas-web/web/internal/probe"
 )
 
 // newTestManager поднимает менеджер с подпиской из локального сервера.
@@ -197,5 +198,54 @@ func TestApplyWithoutXrayFails(t *testing.T) {
 	}
 	if m.State().ActiveKey != "" {
 		t.Error("при неудаче активный сервер не должен запоминаться")
+	}
+}
+
+func TestKeepCurrentAvoidsPointlessSwitch(t *testing.T) {
+	// Лучший быстрее текущего всего на 4% — рвать соединения незачем.
+	results := []probe.Result{
+		{Key: "лучший", Latency: 3, Speed: 103},
+		{Key: "текущий", Latency: 3, Speed: 99},
+	}
+	keep, reason := keepCurrent(results, "текущий")
+	if !keep {
+		t.Error("при разнице в пределах порога нужно остаться на текущем сервере")
+	}
+	if reason == "" {
+		t.Error("причина должна попадать в журнал")
+	}
+
+	// Разница в полтора раза — переключаемся.
+	results[0].Speed = 160
+	if keep, _ := keepCurrent(results, "текущий"); keep {
+		t.Error("при заметном выигрыше нужно переключаться")
+	}
+
+	// Текущий сервер отвалился — переключаемся независимо от разницы.
+	results[1] = probe.Result{Key: "текущий", Error: "нет связи"}
+	results[0].Speed = 100
+	if keep, _ := keepCurrent(results, "текущий"); keep {
+		t.Error("на недоступном сервере оставаться нельзя")
+	}
+
+	// Активного сервера ещё нет — первое применение обязательно.
+	if keep, _ := keepCurrent(results, ""); keep {
+		t.Error("без активного сервера переключение должно происходить")
+	}
+}
+
+func TestKeepCurrentFallsBackToLatency(t *testing.T) {
+	// Скорость не измерена ни у кого: сравниваем задержки, тоже с запасом.
+	results := []probe.Result{
+		{Key: "лучший", Latency: 28},
+		{Key: "текущий", Latency: 30},
+	}
+	if keep, _ := keepCurrent(results, "текущий"); !keep {
+		t.Error("разница 30→28 мс не стоит переключения")
+	}
+
+	results[0].Latency = 5
+	if keep, _ := keepCurrent(results, "текущий"); keep {
+		t.Error("разница 30→5 мс стоит переключения")
 	}
 }
