@@ -32,6 +32,7 @@ type Config struct {
 	XrayInit     string
 	ProxyPort    int    // локальный SOCKS-порт xray, который слушает Квас
 	SpeedTestURL string // откуда качать при замере скорости
+	TunnelURL    string // что запрашивать при проверке работоспособности туннеля
 }
 
 // Default возвращает конфигурацию для штатной установки на роутере.
@@ -54,6 +55,7 @@ func Default() Config {
 		XrayInit:     "",
 		ProxyPort:    1097,
 		SpeedTestURL: "https://speed.cloudflare.com/__down?bytes=20000000",
+		TunnelURL:    "https://www.gstatic.com/generate_204",
 	}
 }
 
@@ -81,6 +83,7 @@ func FromFlags(args []string) (Config, error) {
 	fs.StringVar(&c.XrayInit, "xray-init", envOr("KVASWEB_XRAY_INIT", c.XrayInit), "init-скрипт xray (по умолчанию ищется автоматически)")
 	fs.IntVar(&c.ProxyPort, "proxy-port", envIntOr("KVASWEB_PROXY_PORT", c.ProxyPort), "локальный SOCKS-порт xray")
 	fs.StringVar(&c.SpeedTestURL, "speedtest-url", envOr("KVASWEB_SPEEDTEST_URL", c.SpeedTestURL), "адрес файла для замера скорости")
+	fs.StringVar(&c.TunnelURL, "tunnel-url", envOr("KVASWEB_TUNNEL_URL", c.TunnelURL), "адрес для проверки туннеля и замера задержки")
 	if err := fs.Parse(args); err != nil {
 		return c, err
 	}

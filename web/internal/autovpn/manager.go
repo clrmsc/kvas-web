@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/clrmsc/kvas-web/web/internal/config"
+	"github.com/clrmsc/kvas-web/web/internal/keenetic"
 	"github.com/clrmsc/kvas-web/web/internal/kvas"
 	"github.com/clrmsc/kvas-web/web/internal/probe"
 	"github.com/clrmsc/kvas-web/web/internal/subscription"
@@ -204,7 +205,11 @@ func (m *Manager) runCheck(ctx context.Context, onResult func(probe.Result)) ([]
 	opt := probe.DefaultOptions()
 	opt.XrayBin = m.xrayBin()
 	opt.SpeedTestURL = m.cfg.SpeedTestURL
+	if m.cfg.TunnelURL != "" {
+		opt.TunnelURL = m.cfg.TunnelURL
+	}
 	opt.SpeedTopN = st.SpeedTopN
+	opt.ActiveKey = st.ActiveKey
 
 	// Прошлые замеры скорости передаём в проверку: они задают, у кого
 	// мерить в этот раз, и сохраняются для остальных серверов.
@@ -238,6 +243,15 @@ func (m *Manager) runCheck(ctx context.Context, onResult func(probe.Result)) ([]
 	if !stateCopy.AutoApply || len(results) == 0 || !results[0].Alive() {
 		return results, nil
 	}
+
+	// Победитель может опираться на замер прошлых суток. Переключаться по
+	// устаревшему числу нельзя: перемеряем его и пересортировываем.
+	if results[0].SpeedStale {
+		results = m.refreshWinner(ctx, servers, results, opt)
+		if len(results) == 0 || !results[0].Alive() {
+			return results, nil
+		}
+	}
 	if results[0].Key == stateCopy.ActiveKey {
 		m.log.Info("лучший сервер уже используется", "сервер", results[0].Name)
 		return results, nil
@@ -252,6 +266,52 @@ func (m *Manager) runCheck(ctx context.Context, onResult func(probe.Result)) ([]
 		m.recordError(err)
 	}
 	return results, nil
+}
+
+// refreshWinner перемеряет скорость у сервера, стоящего первым, если та
+// взята из прошлой проверки, и заново упорядочивает результаты.
+func (m *Manager) refreshWinner(ctx context.Context, servers []subscription.Server,
+	results []probe.Result, opt probe.Options) []probe.Result {
+
+	winner := results[0]
+	var target *subscription.Server
+	for i := range servers {
+		if servers[i].Key() == winner.Key {
+			target = &servers[i]
+			break
+		}
+	}
+	if target == nil {
+		return results
+	}
+
+	speed, err := probe.Speed(ctx, *target, opt)
+	for i := range results {
+		if results[i].Key != winner.Key {
+			continue
+		}
+		if err != nil {
+			results[i].SpeedError = err.Error()
+			results[i].Speed = 0
+			results[i].SpeedStale = false
+			m.log.Info("замер лучшего сервера не удался", "сервер", winner.Name, "err", err)
+		} else {
+			results[i].Speed = speed
+			results[i].SpeedStale = false
+			m.log.Info("лучший сервер перемерян", "сервер", winner.Name, "мбит/с", speed)
+		}
+		break
+	}
+	probe.Sort(results)
+
+	m.mu.Lock()
+	m.state.Results = results
+	stateCopy := m.state
+	m.mu.Unlock()
+	if err := saveState(m.cfg.SubscriptionFile(), stateCopy); err != nil {
+		m.log.Warn("состояние подписки не сохранено", "err", err)
+	}
+	return results
 }
 
 // switchGain — насколько лучший сервер должен превосходить текущий, чтобы
@@ -338,6 +398,16 @@ func (m *Manager) Apply(ctx context.Context, key string) error {
 	if err := m.waitProxy(ctx); err != nil {
 		m.rollback(ctx, backup, hadBackup)
 		return fmt.Errorf("туннель не поднялся на сервере %s: %w", target.Name, err)
+	}
+
+	// Прокси-интерфейс Keenetic теряет связь с локальным SOCKS при
+	// перезапуске xray и сам не встаёт. Без него в таблице маршрутизации
+	// туннеля нет маршрута, и помеченный трафик уходит в blackhole —
+	// то есть у части устройств просто пропадает интернет.
+	if err := m.raiseInterface(ctx); err != nil {
+		m.rollback(ctx, backup, hadBackup)
+		return fmt.Errorf("сервер %s применён, но интерфейс туннеля не поднялся: %w",
+			target.Name, err)
 	}
 
 	m.mu.Lock()
@@ -430,6 +500,29 @@ func (m *Manager) restartXray(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("xray не перезапустился: %s", kvas.StripANSI(string(out)))
 	}
+	return nil
+}
+
+// raiseInterface поднимает прокси-интерфейс Keenetic, через который Квас
+// заворачивает трафик в туннель.
+func (m *Manager) raiseInterface(ctx context.Context) error {
+	name, err := kvas.Conf{Path: m.cfg.KvasConf}.Get("INFACE_CLI")
+	if err != nil || strings.TrimSpace(name) == "" {
+		// Интерфейс не настроен — значит Квас работает без прокси-интерфейса
+		// Keenetic, и поднимать нечего.
+		m.log.Debug("INFACE_CLI не задан, интерфейс не поднимаем")
+		return nil
+	}
+	name = strings.TrimSpace(name)
+
+	rci := keenetic.New(m.cfg.RCIAddr)
+	if err := rci.InterfaceUp(ctx, name); err != nil {
+		return fmt.Errorf("не удалось отправить команду роутеру: %w", err)
+	}
+	if err := rci.WaitInterfaceUp(ctx, name, 20*time.Second); err != nil {
+		return err
+	}
+	m.log.Info("интерфейс туннеля поднят", "интерфейс", name)
 	return nil
 }
 

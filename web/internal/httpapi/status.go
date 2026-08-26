@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/clrmsc/kvas-web/web/internal/keenetic"
 	"github.com/clrmsc/kvas-web/web/internal/kvas"
 )
 
@@ -30,6 +31,9 @@ type statusResponse struct {
 	SubscriptionServer string `json:"subscription_server,omitempty"`
 	// SetupFinished — прошёл ли Квас первичную настройку (kvas setup).
 	SetupFinished bool `json:"setup_finished"`
+	// InterfaceUp — поднят ли прокси-интерфейс Keenetic. Если он лежит,
+	// трафик, размеченный в туннель, никуда не идёт.
+	InterfaceUp bool `json:"interface_up"`
 }
 
 type svc struct {
@@ -61,6 +65,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Interface:          conf["INFACE_ENT"],
 		SubscriptionServer: s.autovpn.State().ActiveName,
 		SetupFinished:      kvas.SetupFinished(s.cfg.KvasConf),
+		InterfaceUp:        s.interfaceUp(r, conf["INFACE_CLI"]),
 		VLESS: svc{
 			Running: kvas.ProcessRunning("xray"),
 			Tunnel:  kvas.PortListening(vlessSOCKSPort),
@@ -149,4 +154,18 @@ func atoiOr(s string, def int) int {
 		return v
 	}
 	return def
+}
+
+// interfaceUp спрашивает роутер о состоянии прокси-интерфейса.
+func (s *Server) interfaceUp(r *http.Request, name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	st, err := keenetic.New(s.cfg.RCIAddr).Interface(r.Context(), name)
+	if err != nil {
+		s.log.Debug("состояние интерфейса не получено", "интерфейс", name, "err", err)
+		return false
+	}
+	return st.Up()
 }

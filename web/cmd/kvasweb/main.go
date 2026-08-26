@@ -172,20 +172,25 @@ func runCheck(av *autovpn.Manager) error {
 		return err
 	}
 	for res := range run.Events {
+		name := trim(res.Name, 34)
 		switch {
 		case res.Error != "":
-			fmt.Printf("%-34s недоступен: %s\n", trim(res.Name, 34), res.Error)
+			fmt.Printf("%-34s узел недоступен: %s\n", name, res.Error)
+		case res.TunnelError != "":
+			fmt.Printf("%-34s туннель не работает: %s\n", name, res.TunnelError)
 		case res.Speed > 0:
 			stale := ""
 			if res.SpeedStale {
 				stale = " (прошлый замер)"
 			}
-			fmt.Printf("%-34s %5.0f мс  %6.1f Мбит/с%s\n", trim(res.Name, 34), res.Latency, res.Speed, stale)
+			fmt.Printf("%-34s %6.0f мс  %6.1f Мбит/с%s\n", name, res.Tunnel, res.Speed, stale)
 		case res.SpeedError != "":
-			fmt.Printf("%-34s %5.0f мс  замер скорости не удался: %s\n",
-				trim(res.Name, 34), res.Latency, res.SpeedError)
+			fmt.Printf("%-34s %6.0f мс  замер скорости не удался: %s\n",
+				name, res.Tunnel, res.SpeedError)
+		case res.Tunnel > 0:
+			fmt.Printf("%-34s %6.0f мс через туннель\n", name, res.Tunnel)
 		default:
-			fmt.Printf("%-34s %5.0f мс\n", trim(res.Name, 34), res.Latency)
+			fmt.Printf("%-34s %6.0f мс отклик узла\n", name, res.Latency)
 		}
 	}
 

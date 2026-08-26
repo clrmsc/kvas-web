@@ -2,6 +2,7 @@ package probe
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -18,14 +19,31 @@ import (
 	"github.com/clrmsc/kvas-web/web/internal/subscription"
 )
 
+const (
+	// tunnelAttempts — сколько раз пробуем выйти наружу через свежий туннель.
+	tunnelAttempts = 3
+	// tunnelWarmup — пауза между попытками, чтобы xray успел договориться
+	// с сервером.
+	tunnelWarmup = 1200 * time.Millisecond
+)
+
+// ErrProbeUnavailable означает, что проверить туннель нечем: не нашёлся или
+// не запустился xray. Это неисправность роутера, а не сервера, — помечать
+// серверы нерабочими в такой ситуации нельзя, иначе автовыбор встанет весь.
+var ErrProbeUnavailable = errors.New("проверка туннеля недоступна")
+
 // Result — итог проверки одного сервера.
 type Result struct {
 	Name    string  `json:"name"`
 	Address string  `json:"address"`
 	Port    int     `json:"port"`
 	Key     string  `json:"key"`
-	Latency float64 `json:"latency_ms"` // 0, если сервер недоступен
-	Speed   float64 `json:"speed_mbps"` // 0, если скорость не измерялась
+	Latency float64 `json:"latency_ms"` // отклик входного узла; 0, если недоступен
+	// Tunnel — задержка запроса, прошедшего через туннель до внешнего сайта.
+	// Именно она говорит о качестве сервера: у провайдеров с близкими
+	// точками входа отклик самого узла одинаков у всех серверов.
+	Tunnel float64 `json:"tunnel_ms"`
+	Speed  float64 `json:"speed_mbps"` // 0, если скорость не измерялась
 	// Error — причина недоступности сервера.
 	Error string `json:"error,omitempty"`
 	// SpeedError — почему не удалось измерить скорость. Сервер при этом
@@ -34,22 +52,42 @@ type Result struct {
 	SpeedError string `json:"speed_error,omitempty"`
 	// SpeedStale означает, что скорость взята из прошлой проверки: за один
 	// раз она измеряется лишь у части серверов.
-	SpeedStale bool   `json:"speed_stale,omitempty"`
-	Checked    string `json:"checked_at"`
+	SpeedStale bool `json:"speed_stale,omitempty"`
+	// TunnelError — почему через сервер не удалось выйти в интернет.
+	// Открытый порт ещё не означает работающий туннель.
+	TunnelError string `json:"tunnel_error,omitempty"`
+	Checked     string `json:"checked_at"`
 }
 
-// Alive сообщает, откликнулся ли сервер на проверку задержки.
-func (r Result) Alive() bool { return r.Error == "" && r.Latency > 0 }
+// Reachable сообщает, что входной узел сервера откликнулся.
+func (r Result) Reachable() bool { return r.Error == "" && r.Latency > 0 }
+
+// Alive сообщает, что через сервер удалось выйти в интернет. Пока проверка
+// туннеля не выполнялась, достаточно отклика входного узла.
+func (r Result) Alive() bool {
+	if !r.Reachable() {
+		return false
+	}
+	if r.TunnelError != "" {
+		return false
+	}
+	return true
+}
 
 // Options — настройки проверки.
 type Options struct {
 	XrayBin      string        // путь к xray, обычно /opt/sbin/xray
 	SpeedTestURL string        // откуда качать при замере скорости
+	TunnelURL    string        // что запрашивать при проверке туннеля
 	LatencyTries int           // сколько раз измерять задержку
 	DialTimeout  time.Duration // таймаут TCP-подключения
 	SpeedTimeout time.Duration // сколько секунд качать
 	SpeedLimit   int64         // сколько байт максимум качать
-	SpeedTopN    int           // для скольких лучших по задержке мерить скорость
+	SpeedTopN    int           // для скольких серверов мерить скорость за раз
+	// ActiveKey — сервер, который используется сейчас. Его скорость
+	// перемеряется всегда: иначе свежие замеры соперников сравнивались бы
+	// с его устаревшим значением, и выбор оказывался бы случайным.
+	ActiveKey string
 }
 
 // DefaultOptions подобраны так, чтобы суточная проверка нескольких десятков
@@ -58,6 +96,8 @@ func DefaultOptions() Options {
 	return Options{
 		XrayBin:      "/opt/sbin/xray",
 		SpeedTestURL: "https://speed.cloudflare.com/__down?bytes=20000000",
+		// Страница на 204 без тела: замеряет именно задержку, а не канал.
+		TunnelURL:    "https://www.gstatic.com/generate_204",
 		LatencyTries: 3,
 		DialTimeout:  4 * time.Second,
 		SpeedTimeout: 6 * time.Second,
@@ -98,12 +138,89 @@ func Latency(ctx context.Context, endpoint string, tries int, timeout time.Durat
 	return best, nil
 }
 
-// Speed поднимает временный экземпляр xray на свободном порту и качает
-// через него тестовый файл. Возвращает скорость в мегабитах в секунду.
-func Speed(ctx context.Context, s subscription.Server, opt Options) (float64, error) {
-	port, err := freePort()
+// TunnelCheck поднимает туннель до сервера и запрашивает через него
+// внешнюю страницу. Возвращает задержку такого запроса — то самое время,
+// которое почувствует пользователь, открывая сайт через этот сервер.
+//
+// Заодно это единственная надёжная проверка работоспособности: открытый
+// порт входного узла ничего не говорит о том, ходит ли трафик наружу.
+func TunnelCheck(ctx context.Context, s subscription.Server, opt Options) (time.Duration, error) {
+	var latency time.Duration
+	err := withTunnel(ctx, s, opt, 30*time.Second, func(proxyAddr string) error {
+		client := socksClient(proxyAddr, 8*time.Second)
+
+		// Свежий xray принимает соединения на локальном порту раньше, чем
+		// успевает договориться с сервером, и первые попытки обрываются.
+		// Поэтому даём ему передышку и пробуем несколько раз.
+		var lastErr error
+		for attempt := 0; attempt < tunnelAttempts; attempt++ {
+			if attempt > 0 {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(tunnelWarmup):
+				}
+			}
+
+			reqCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+			req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, opt.TunnelURL, nil)
+			if err != nil {
+				cancel()
+				return err
+			}
+			start := time.Now()
+			resp, err := client.Do(req)
+			if err != nil {
+				cancel()
+				lastErr = err
+				continue
+			}
+			io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+			resp.Body.Close()
+			cancel()
+			if resp.StatusCode >= 400 {
+				return fmt.Errorf("проверочная страница ответила кодом %d", resp.StatusCode)
+			}
+			// Берём лучшее измерение: первые попытки включают установку
+			// Reality-сессии и завышают задержку.
+			elapsed := time.Since(start)
+			if latency == 0 || elapsed < latency {
+				latency = elapsed
+			}
+		}
+		if latency == 0 && lastErr != nil {
+			return fmt.Errorf("через туннель нет доступа в интернет: %w", lastErr)
+		}
+		return nil
+	})
 	if err != nil {
 		return 0, err
+	}
+	if latency <= 0 {
+		return 0, fmt.Errorf("задержку через туннель измерить не удалось")
+	}
+	return latency, nil
+}
+
+// socksClient — HTTP-клиент, ходящий через локальный SOCKS5 временного xray.
+func socksClient(proxyAddr string, tlsTimeout time.Duration) *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			DialContext:         socksDialer{proxyAddr: proxyAddr}.DialContext,
+			DisableKeepAlives:   true,
+			TLSHandshakeTimeout: tlsTimeout,
+		},
+	}
+}
+
+// withTunnel поднимает xray с конфигурацией сервера на свободном порту,
+// выполняет fn и гарантированно останавливает процесс.
+func withTunnel(ctx context.Context, s subscription.Server, opt Options,
+	extra time.Duration, fn func(proxyAddr string) error) error {
+
+	port, err := freePort()
+	if err != nil {
+		return err
 	}
 
 	cfgOpt := subscription.DefaultXrayOptions()
@@ -112,21 +229,21 @@ func Speed(ctx context.Context, s subscription.Server, opt Options) (float64, er
 	cfgOpt.ErrorLog = ""
 	cfg, err := subscription.XrayConfig(s, cfgOpt)
 	if err != nil {
-		return 0, err
+		return err
 	}
 
 	tmp, err := os.CreateTemp("", "kvasweb-probe-*.json")
 	if err != nil {
-		return 0, err
+		return err
 	}
 	defer os.Remove(tmp.Name())
 	if _, err := tmp.Write(cfg); err != nil {
 		tmp.Close()
-		return 0, err
+		return err
 	}
 	tmp.Close()
 
-	runCtx, cancel := context.WithTimeout(ctx, opt.SpeedTimeout+15*time.Second)
+	runCtx, cancel := context.WithTimeout(ctx, extra)
 	defer cancel()
 
 	cmd := exec.CommandContext(runCtx, opt.XrayBin, "run", "-c", tmp.Name())
@@ -138,7 +255,8 @@ func Speed(ctx context.Context, s subscription.Server, opt Options) (float64, er
 	// Убиваем всё дерево процессов: xray не должен пережить проверку.
 	cmd.WaitDelay = 3 * time.Second
 	if err := cmd.Start(); err != nil {
-		return 0, fmt.Errorf("не удалось запустить %s: %w", filepath.Base(opt.XrayBin), err)
+		return fmt.Errorf("%w: не удалось запустить %s: %v",
+			ErrProbeUnavailable, filepath.Base(opt.XrayBin), err)
 	}
 	defer func() {
 		_ = cmd.Process.Kill()
@@ -147,23 +265,41 @@ func Speed(ctx context.Context, s subscription.Server, opt Options) (float64, er
 
 	proxyAddr := net.JoinHostPort(cfgOpt.ListenIP, fmt.Sprint(port))
 	if err := waitForPort(runCtx, proxyAddr, 5*time.Second); err != nil {
-		return 0, fmt.Errorf("туннель не поднялся: %w%s", err, xrayOut.suffix())
+		// Локальный порт не открылся — виноват xray на роутере, не сервер.
+		return fmt.Errorf("%w: туннель не поднялся: %v%s", ErrProbeUnavailable, err, xrayOut.suffix())
 	}
 
-	// Разовый обрыв на первом соединении — обычное дело: сервер может
-	// отбить первую попытку, пока туннель прогревается. Пробуем дважды.
-	var lastErr error
-	for attempt := 1; attempt <= 2; attempt++ {
-		mbps, err := download(runCtx, proxyAddr, opt)
-		if err == nil {
-			return mbps, nil
-		}
-		lastErr = err
-		if runCtx.Err() != nil {
-			break
-		}
+	if err := fn(proxyAddr); err != nil {
+		return fmt.Errorf("%w%s", err, xrayOut.suffix())
 	}
-	return 0, fmt.Errorf("%w%s", lastErr, xrayOut.suffix())
+	return nil
+}
+
+// Speed поднимает временный экземпляр xray на свободном порту и качает
+// через него тестовый файл. Возвращает скорость в мегабитах в секунду.
+func Speed(ctx context.Context, s subscription.Server, opt Options) (float64, error) {
+	var mbps float64
+	err := withTunnel(ctx, s, opt, opt.SpeedTimeout+15*time.Second, func(proxyAddr string) error {
+		// Разовый обрыв на первом соединении — обычное дело: сервер может
+		// отбить первую попытку, пока туннель прогревается. Пробуем дважды.
+		var lastErr error
+		for attempt := 1; attempt <= 2; attempt++ {
+			v, err := download(ctx, proxyAddr, opt)
+			if err == nil {
+				mbps = v
+				return nil
+			}
+			lastErr = err
+			if ctx.Err() != nil {
+				break
+			}
+		}
+		return lastErr
+	})
+	if err != nil {
+		return 0, err
+	}
+	return mbps, nil
 }
 
 // boundedBuffer собирает начало вывода команды: полный лог xray в сообщении
@@ -227,13 +363,7 @@ func (b *boundedBuffer) suffix() string {
 
 // download качает тестовый файл через прокси и считает скорость.
 func download(ctx context.Context, proxyAddr string, opt Options) (float64, error) {
-	client := &http.Client{
-		Transport: &http.Transport{
-			DialContext:         socksDialer{proxyAddr: proxyAddr}.DialContext,
-			DisableKeepAlives:   true,
-			TLSHandshakeTimeout: 8 * time.Second,
-		},
-	}
+	client := socksClient(proxyAddr, 8*time.Second)
 
 	reqCtx, cancel := context.WithTimeout(ctx, opt.SpeedTimeout)
 	defer cancel()
@@ -301,6 +431,15 @@ func Sort(results []Result) {
 // и такие различия — шум измерения, а не свойство сервера.
 const latencySignificance = 10 // мс
 
+// latencyOf возвращает задержку, по которой стоит сравнивать серверы:
+// через туннель, если она известна, иначе отклик входного узла.
+func latencyOf(r Result) float64 {
+	if r.Tunnel > 0 {
+		return r.Tunnel
+	}
+	return r.Latency
+}
+
 // Better сравнивает два результата. Скорость важнее задержки, но при
 // близкой скорости (разница до 15%) выигрывает более отзывчивый сервер —
 // если его отзывчивость отличается ощутимо, а не на доли миллисекунды.
@@ -313,7 +452,7 @@ func Better(a, b Result) bool {
 	}
 	switch {
 	case a.Speed == 0 && b.Speed == 0:
-		return a.Latency < b.Latency
+		return latencyOf(a) < latencyOf(b)
 	case a.Speed == 0:
 		return false
 	case b.Speed == 0:
@@ -324,12 +463,13 @@ func Better(a, b Result) bool {
 		fast, slow = slow, fast
 	}
 	if slow >= fast*0.85 {
-		diff := a.Latency - b.Latency
+		la, lb := latencyOf(a), latencyOf(b)
+		diff := la - lb
 		if diff < 0 {
 			diff = -diff
 		}
 		if diff >= latencySignificance {
-			return a.Latency < b.Latency
+			return la < lb
 		}
 		// Задержки неотличимы — решает скорость, пусть и с малым отрывом.
 	}

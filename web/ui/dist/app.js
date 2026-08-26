@@ -202,7 +202,9 @@ loaders.overview = async () => {
     stat('Блокировка рекламы', s.adblock ? 'включена' : 'выключена'),
     statBadge('VLESS', vlessDot, vlessText),
     statBadge('Hysteria', hystDot, hystText),
-    stat('Интерфейс', s.interface || '—'),
+    statBadge('Интерфейс туннеля',
+      !s.interface ? '' : s.interface_up ? 'ok' : 'err',
+      s.interface ? `${s.interface}: ${s.interface_up ? 'поднят' : 'лежит'}` : 'не настроен'),
     stat('Резервный канал', s.failover === 'on' ? 'включён' : 'ручной режим'),
     s.subscription_server ? stat('Сервер из подписки', s.subscription_server) : '',
   ].join('');
@@ -431,14 +433,21 @@ function renderSubResults(results) {
     const active = r.key === subState?.active_key;
     let metrics;
     if (r.error) {
-      metrics = `<span style="color:var(--err)">${esc(shortError(r.error))}</span>`;
+      metrics = `<span style="color:var(--err)">узел недоступен: ${esc(shortError(r.error))}</span>`;
+    } else if (r.tunnel_error) {
+      metrics = `<span style="color:var(--err)">туннель не работает: ${esc(shortError(r.tunnel_error))}</span>`;
     } else {
+      // Показываем задержку через туннель — она и определяет, как быстро
+      // открываются сайты. Отклик самого узла у всех серверов одинаков.
+      const ping = r.tunnel_ms
+        ? `${Math.round(r.tunnel_ms)} мс`
+        : `${Math.round(r.latency_ms)} мс до узла`;
       const speed = r.speed_mbps
         ? `${r.speed_mbps.toFixed(1)} Мбит/с${r.speed_stale ? ' (прошлый замер)' : ''}`
         : r.speed_error
           ? `скорость не измерена: ${esc(shortError(r.speed_error))}`
           : 'скорость ещё не мерили';
-      metrics = `${Math.round(r.latency_ms)} мс · ${speed}`;
+      metrics = `${ping} · ${speed}`;
     }
 
     return `

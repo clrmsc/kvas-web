@@ -227,7 +227,7 @@ func TestSpeedCandidatesPrefersUnmeasured(t *testing.T) {
 		{Key: "e", Error: "нет связи"},     // недоступен
 	}
 
-	got := speedCandidates(results, 3)
+	got := speedCandidates(results, 3, "")
 	if len(got) != 3 {
 		t.Fatalf("выбрано %d серверов, ожидалось 3", len(got))
 	}
@@ -248,7 +248,7 @@ func TestSpeedCandidatesPrefersUnmeasured(t *testing.T) {
 
 func TestSpeedCandidatesSkipsDeadOnly(t *testing.T) {
 	results := []Result{{Key: "a", Error: "нет связи"}, {Key: "b", Error: "нет связи"}}
-	if got := speedCandidates(results, 5); len(got) != 0 {
+	if got := speedCandidates(results, 5, ""); len(got) != 0 {
 		t.Errorf("для недоступных серверов список должен быть пуст, получено %v", got)
 	}
 }
@@ -267,5 +267,61 @@ func TestBetterIgnoresNoiseLatency(t *testing.T) {
 	distant := Result{Latency: 200, Speed: 137}
 	if !Better(nearby, distant) {
 		t.Error("при заметной разнице задержек должен выигрывать отзывчивый сервер")
+	}
+}
+
+func TestBetterUsesTunnelLatency(t *testing.T) {
+	// Отклик входного узла у обоих одинаков — различать серверы должна
+	// задержка через туннель.
+	near := Result{Latency: 3, Tunnel: 254, Speed: 150}
+	far := Result{Latency: 3, Tunnel: 900, Speed: 155}
+	if !Better(near, far) {
+		t.Error("при близкой скорости должен выигрывать меньший пинг через туннель")
+	}
+
+	// Скорость никто не мерил — сравниваем по туннельной задержке.
+	a := Result{Latency: 3, Tunnel: 280}
+	b := Result{Latency: 2, Tunnel: 850}
+	if !Better(a, b) {
+		t.Error("без замеров скорости решает задержка через туннель, а не отклик узла")
+	}
+}
+
+func TestTunnelErrorMakesServerUnusable(t *testing.T) {
+	// Порт открыт, но наружу трафик не идёт — как раз случай, когда
+	// проверка по TCP показывает «доступен», а туннель мёртв.
+	broken := Result{Latency: 3, TunnelError: "через туннель нет доступа в интернет"}
+	if broken.Reachable() != true {
+		t.Error("входной узел откликнулся, Reachable должен быть true")
+	}
+	if broken.Alive() {
+		t.Error("сервер без выхода в интернет непригоден")
+	}
+
+	working := Result{Latency: 3, Tunnel: 300}
+	if !Better(working, broken) {
+		t.Error("рабочий сервер должен идти впереди неработающего")
+	}
+}
+
+func TestSpeedCandidatesAlwaysRemeasuresActive(t *testing.T) {
+	// У активного сервера скорость известна и высока — но сравнивать с ним
+	// соперников по устаревшему значению нельзя, поэтому он идёт первым.
+	results := []Result{
+		{Key: "новый", Latency: 3, Tunnel: 300},
+		{Key: "активный", Latency: 3, Tunnel: 300, Speed: 148, SpeedStale: true},
+	}
+	got := speedCandidates(results, 2, "активный")
+	if len(got) == 0 || results[got[0]].Key != "активный" {
+		t.Fatalf("первым должен перемеряться активный сервер, получено %v", got)
+	}
+
+	// Недоступный активный сервер в замер не попадает.
+	results[1] = Result{Key: "активный", Error: "нет связи"}
+	got = speedCandidates(results, 2, "активный")
+	for _, idx := range got {
+		if results[idx].Key == "активный" {
+			t.Error("недоступный сервер мерить не нужно")
+		}
 	}
 }
