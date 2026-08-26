@@ -28,6 +28,8 @@ type statusResponse struct {
 	Interface string `json:"interface"`
 	// Сервер, выбранный из подписки; пусто, если подписка не используется.
 	SubscriptionServer string `json:"subscription_server,omitempty"`
+	// SetupFinished — прошёл ли Квас первичную настройку (kvas setup).
+	SetupFinished bool `json:"setup_finished"`
 }
 
 type svc struct {
@@ -58,6 +60,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Adblock:            kvas.FileHasLine(s.cfg.DnsmasqConf, "addn-hosts=/opt/etc/adblock/ads.kvas.list"),
 		Interface:          conf["INFACE_ENT"],
 		SubscriptionServer: s.autovpn.State().ActiveName,
+		SetupFinished:      kvas.SetupFinished(s.cfg.KvasConf),
 		VLESS: svc{
 			Running: kvas.ProcessRunning("xray"),
 			Tunnel:  kvas.PortListening(vlessSOCKSPort),

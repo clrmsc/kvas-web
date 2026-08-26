@@ -118,3 +118,28 @@ func TestPortListening(t *testing.T) {
 		t.Errorf("свободный порт %d определён как занятый", freePort)
 	}
 }
+
+func TestSetupFinished(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "kvas.conf")
+
+	cases := map[string]bool{
+		"SETUP_FINISHED=true\n":  true,
+		"SETUP_FINISHED=yes\n":   true,
+		"SETUP_FINISHED=\n":      false,
+		"SETUP_FINISHED=false\n": false,
+		"INFACE_ENT=t2s21\n":     false,
+	}
+	for body, want := range cases {
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := SetupFinished(path); got != want {
+			t.Errorf("для %q получено %v, ожидалось %v", body, got, want)
+		}
+	}
+
+	if SetupFinished(filepath.Join(dir, "нет-файла")) {
+		t.Error("без файла настройка не может считаться завершённой")
+	}
+}

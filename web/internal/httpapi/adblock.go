@@ -73,6 +73,9 @@ func (s *Server) handleBlockedList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBlockedAdd(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSetup(w) {
+		return
+	}
 	var body struct {
 		Domain string `json:"domain"`
 	}
@@ -94,6 +97,9 @@ func (s *Server) handleBlockedAdd(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBlockedDel(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSetup(w) {
+		return
+	}
 	raw, err := url.PathUnescape(r.PathValue("domain"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "некорректный адрес запроса")

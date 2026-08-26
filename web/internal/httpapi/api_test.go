@@ -55,7 +55,7 @@ func newTestServer(t *testing.T) (*httptest.Server, config.Config, string) {
 			t.Fatal(err)
 		}
 	}
-	write(cfg.KvasConf, "APP_VERSION=1.1.9\nINFACE_ENT=Proxy21\nroute_full_ip=192.168.1.5\n")
+	write(cfg.KvasConf, "APP_VERSION=1.1.9\nINFACE_ENT=Proxy21\nroute_full_ip=192.168.1.5\nSETUP_FINISHED=true\n")
 	write(cfg.HostsList, "youtube.com\nchatgpt.com\n")
 	write(cfg.TagsList, "[Видео]\nyoutube.com\nvimeo.com\n")
 	write(cfg.AdblockList, "ads.example.com\n")
@@ -364,5 +364,50 @@ func TestTagsFileFallsBackToPackagePath(t *testing.T) {
 	s = &Server{cfg: cfg}
 	if got := s.tagsFile(); got != cfg.TagsList && got != "/opt/apps/kvas/etc/conf/tags.list" {
 		t.Errorf("неожиданный путь %q", got)
+	}
+}
+
+func TestOperationsRejectedBeforeSetup(t *testing.T) {
+	srv, cfg, calls := newTestServer(t)
+	client := login(t, srv)
+
+	// Возвращаем конфигурацию в состояние «kvas setup ещё не выполнялся»:
+	// в таком виде CLI Кваса уходит в интерактивный мастер и на пустом
+	// вводе зацикливается, поэтому операция должна отклоняться до вызова.
+	if err := os.WriteFile(cfg.KvasConf, []byte("APP_VERSION=1.1.9\nSETUP_FINISHED=\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := client.Post(srv.URL+"/api/hosts", "application/json",
+		strings.NewReader(`{"domain":"example.com"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("до настройки Кваса ожидался код 409, получено %d", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "kvas setup") {
+		t.Errorf("ответ должен подсказывать, что делать: %s", body)
+	}
+
+	// Главное: CLI не вызывался вовсе.
+	if data, err := os.ReadFile(calls); err == nil && len(data) > 0 {
+		t.Errorf("CLI не должен запускаться до настройки, но был вызван: %s", data)
+	}
+
+	// В сводке состояния это видно интерфейсу.
+	st, err := client.Get(srv.URL + "/api/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Body.Close()
+	var status statusResponse
+	if err := json.NewDecoder(st.Body).Decode(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status.SetupFinished {
+		t.Error("статус должен сообщать, что настройка не завершена")
 	}
 }

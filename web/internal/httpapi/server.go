@@ -200,6 +200,18 @@ func (s *Server) staticHandler() http.Handler {
 	})
 }
 
+// requireSetup отклоняет операцию, если Квас ещё не настроен: его CLI в
+// таком состоянии уходит в интерактивный мастер, отвечать которому из
+// веб-интерфейса нечем.
+func (s *Server) requireSetup(w http.ResponseWriter) bool {
+	if kvas.SetupFinished(s.cfg.KvasConf) {
+		return true
+	}
+	writeError(w, http.StatusConflict,
+		"Квас ещё не настроен. Подключитесь к роутеру по SSH и выполните: kvas setup")
+	return false
+}
+
 // tagsFile возвращает путь к файлу заквасок: в разных установках Кваса
 // он лежит либо в каталоге пакета, либо в /opt/etc.
 func (s *Server) tagsFile() string {

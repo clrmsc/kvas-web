@@ -175,6 +175,10 @@ loaders.overview = async () => {
 
   $('#hdr-version').textContent = s.version ? `v${s.version}` : '';
 
+  // Пока не пройден kvas setup, операции отклоняются сервисом — говорим об
+  // этом сразу, а не после нажатия кнопки.
+  $('#setup-warning').classList.toggle('hidden', s.setup_finished !== false);
+
   const active = s.mode === 'vless' ? s.vless : s.mode === 'hysteria' ? s.hysteria : null;
   const tunnelUp = Boolean(active?.running && active?.tunnel);
   const hdr = $('#hdr-tunnel');

@@ -23,6 +23,9 @@ func (s *Server) handleHostsList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHostAdd(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSetup(w) {
+		return
+	}
 	var body struct {
 		Domain string `json:"domain"`
 	}
@@ -44,6 +47,9 @@ func (s *Server) handleHostAdd(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHostDel(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSetup(w) {
+		return
+	}
 	raw, err := url.PathUnescape(r.PathValue("domain"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "некорректный адрес запроса")
@@ -79,6 +85,9 @@ func (s *Server) handleHostsExport(w http.ResponseWriter, r *http.Request) {
 // handleHostsImport принимает список доменов, чистит его и отдаёт прогресс
 // импорта потоком server-sent events: на большом списке это минуты работы.
 func (s *Server) handleHostsImport(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSetup(w) {
+		return
+	}
 	var body struct {
 		Domains string `json:"domains"`
 	}

@@ -11,11 +11,17 @@ import (
 
 // handleServiceInit пересобирает ipset и перезапускает службы Кваса.
 func (s *Server) handleServiceInit(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSetup(w) {
+		return
+	}
 	s.streamCommand(w, r, "init")
 }
 
 // handleServiceUpdate обновляет списки доменов из внешних источников.
 func (s *Server) handleServiceUpdate(w http.ResponseWriter, r *http.Request) {
+	if !s.requireSetup(w) {
+		return
+	}
 	s.streamCommand(w, r, "update")
 }
 

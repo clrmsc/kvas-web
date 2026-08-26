@@ -52,6 +52,15 @@
   </div>
 
   <main>
+    <div class="card hidden" id="setup-warning"
+         style="border-color:var(--warn); border-left:3px solid var(--warn)">
+      <h2>Квас не настроен</h2>
+      <p class="hint" style="margin:0">
+        Пока не выполнена первичная настройка, изменять списки и запускать
+        обслуживание нельзя. Подключитесь к роутеру по SSH и выполните
+        <code>kvas setup</code> — мастер спросит про интерфейс туннеля.
+      </p>
+    </div>
     <!-- Обзор -->
     <section data-panel="overview">
       <div class="card">

@@ -63,6 +63,9 @@ func (s *Server) handleTagDisable(w http.ResponseWriter, r *http.Request) {
 // применять секцию одной командой, поэтому домены передаются пачками
 // в kvas add / kvas del.
 func (s *Server) applyTag(w http.ResponseWriter, r *http.Request, enable bool) {
+	if !s.requireSetup(w) {
+		return
+	}
 	raw, err := url.PathUnescape(r.PathValue("tag"))
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "некорректное имя закваски")
