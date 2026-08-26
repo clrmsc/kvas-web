@@ -312,22 +312,33 @@ $('#btn-import').addEventListener('click', async () => {
   const text = $('#import-text').value.trim();
   if (!text) { toast('Список пуст', 'err'); return; }
 
+  const replace = $('#import-replace').checked;
+  if (replace && !confirm(
+      'Список будет заменён целиком — текущие домены из него уйдут. Продолжить?')) {
+    return;
+  }
+
   const log = $('#import-log');
   log.classList.remove('hidden');
   log.textContent = '';
   $('#btn-import').disabled = true;
   try {
     await stream('/api/hosts/import', {
-      body: { domains: text },
+      body: { domains: text, replace },
       onEvent: (event, data) => {
         if (event === 'start') {
-          appendLog(log, `Импортируем ${data.total} доменов` +
+          appendLog(log, (data.replace ? 'Заменяем список на ' : 'Добавляем ') +
+            `${data.total} доменов` +
             (data.skipped ? `, пропущено некорректных: ${data.skipped}` : ''));
+          if (data.backup) appendLog(log, `Копия прежнего списка: ${data.backup}`);
         }
         if (event === 'line') appendLog(log, data.line);
-        if (event === 'error') appendLog(log, `ОШИБКА: ${data.error}`);
+        if (event === 'error') {
+          appendLog(log, `ОШИБКА: ${data.error}`);
+          if (data.backup) appendLog(log, `Прежний список можно вернуть из ${data.backup}`);
+        }
         if (event === 'done') {
-          appendLog(log, `Готово: добавлено ${data.imported}`);
+          appendLog(log, `Готово: обработано ${data.imported}`);
           toast('Импорт завершён');
           $('#import-text').value = '';
           loaders.hosts().catch(handle);

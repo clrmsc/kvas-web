@@ -411,3 +411,64 @@ func TestOperationsRejectedBeforeSetup(t *testing.T) {
 		t.Error("статус должен сообщать, что настройка не завершена")
 	}
 }
+
+func TestImportAddsToListInsteadOfReplacing(t *testing.T) {
+	srv, cfg, calls := newTestServer(t)
+	client := login(t, srv)
+
+	// В списке уже есть домены; импорт не должен их потерять.
+	resp, err := client.Post(srv.URL+"/api/hosts/import", "application/json",
+		strings.NewReader(`{"domains":"netflix.com\nyoutube.com"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("импорт вернул %d: %s", resp.StatusCode, body)
+	}
+
+	logged, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmds := strings.TrimSpace(string(logged))
+
+	// Вызывается add, а не import: последний заменяет список целиком.
+	if !strings.Contains(cmds, "add netflix.com") {
+		t.Errorf("ожидался вызов add с новым доменом, получено: %q", cmds)
+	}
+	if strings.Contains(cmds, "import") {
+		t.Errorf("import заменяет список и в этом режиме использоваться не должен: %q", cmds)
+	}
+	// youtube.com уже в списке — повторно добавлять его незачем.
+	if strings.Contains(cmds, "youtube.com") {
+		t.Errorf("уже имеющийся домен не должен добавляться заново: %q", cmds)
+	}
+
+	// Копия прежнего списка сохранена.
+	if _, err := os.Stat(filepath.Join(cfg.StateDir, "kvas.list.bak")); err != nil {
+		t.Errorf("копия списка не создана: %v", err)
+	}
+}
+
+func TestImportCanReplaceListExplicitly(t *testing.T) {
+	srv, _, calls := newTestServer(t)
+	client := login(t, srv)
+
+	resp, err := client.Post(srv.URL+"/api/hosts/import", "application/json",
+		strings.NewReader(`{"domains":"netflix.com","replace":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("импорт с заменой вернул %d", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	logged, _ := os.ReadFile(calls)
+	if !strings.Contains(string(logged), "import") {
+		t.Errorf("для замены списка ожидался вызов import, получено: %q\nответ: %s", logged, body)
+	}
+}

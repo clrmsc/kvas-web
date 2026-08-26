@@ -92,8 +92,19 @@
 
       <div class="card">
         <h2>Массовый импорт</h2>
-        <p class="hint">По одному домену в строке. Ссылки и строки из hosts тоже подойдут.</p>
+        <p class="hint">
+          По одному домену в строке. Ссылки и строки из hosts тоже подойдут.
+          Домены добавляются к текущему списку; перед изменением сохраняется
+          его копия.
+        </p>
         <textarea id="import-text" placeholder="youtube.com&#10;chatgpt.com"></textarea>
+
+        <div class="switch" style="margin-top:12px">
+          <input type="checkbox" id="import-replace">
+          <label class="track" for="import-replace"></label>
+          <span>Заменить список целиком, а не добавить</span>
+        </div>
+
         <div class="row" style="margin-top:10px">
           <button class="btn primary" id="btn-import">Импортировать</button>
           <a class="btn" href="/api/hosts/export" download="kvas.list">Скачать список</a>
