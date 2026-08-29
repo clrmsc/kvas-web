@@ -86,6 +86,9 @@ func (s *Server) Handler() http.Handler {
 	protected.HandleFunc("POST /api/subscription/check", s.handleSubscriptionCheck)
 	protected.HandleFunc("POST /api/subscription/apply", s.handleSubscriptionApply)
 
+	protected.HandleFunc("GET /api/xray", s.handleXrayStatus)
+	protected.HandleFunc("POST /api/xray/update", s.handleXrayUpdate)
+
 	protected.HandleFunc("GET /api/vpn", s.handleVPNStatus)
 	protected.HandleFunc("POST /api/vpn/mode", s.handleVPNSet)
 
@@ -199,6 +202,9 @@ func (s *Server) staticHandler() http.Handler {
 		files.ServeHTTP(w, r)
 	})
 }
+
+// xrayBin — путь к клиенту xray, с которым работает сервис.
+func (s *Server) xrayBin() string { return s.autovpn.XrayBin() }
 
 // requireSetup отклоняет операцию, если Квас ещё не настроен: его CLI в
 // таком состоянии уходит в интерактивный мастер, отвечать которому из

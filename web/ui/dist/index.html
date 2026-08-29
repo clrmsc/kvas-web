@@ -275,6 +275,23 @@
       </div>
 
       <div class="card">
+        <h2>Клиент xray</h2>
+        <p class="hint">
+          Через него работает туннель. Провайдеры обновляют серверную часть
+          Reality, и устаревший клиент перестаёт подключаться к части серверов —
+          в списке они выглядят как «туннель не работает». В репозитории Entware
+          версия обычно отстаёт, поэтому обновление идёт с официальных сборок
+          XTLS с проверкой контрольной суммы.
+        </p>
+        <div class="grid-2" id="xray-status"></div>
+        <div class="row" style="margin-top:12px">
+          <button class="btn" id="btn-xray-check">Проверить обновление</button>
+          <button class="btn primary hidden" id="btn-xray-update">Обновить</button>
+        </div>
+        <pre class="log hidden" id="xray-log"></pre>
+      </div>
+
+      <div class="card">
         <h2>Журнал веб-интерфейса</h2>
         <div class="row" style="margin-bottom:10px">
           <button class="btn" id="btn-logs">Обновить</button>

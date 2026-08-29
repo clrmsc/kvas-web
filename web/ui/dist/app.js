@@ -685,9 +685,81 @@ $('#password-form').addEventListener('submit', async (e) => {
   } catch (err) { handle(err); }
 });
 
+/* ---------------- Клиент xray ---------------- */
+
+let xrayLatest = null;
+
+async function loadXray(check = false) {
+  const data = await api(`/api/xray${check ? '?check=1' : ''}`);
+  xrayLatest = data.latest ?? null;
+
+  const cards = [stat('Установлена', data.installed || 'не найден')];
+  if (data.latest) {
+    cards.push(stat('Последняя', `${data.latest}${data.published ? ` от ${data.published}` : ''}`));
+  }
+  if (data.check_error) {
+    cards.push(stat('Проверка не удалась', shortError(data.check_error)));
+  }
+  $('#xray-status').innerHTML = cards.join('');
+
+  // Кнопка обновления появляется, только когда есть куда обновляться.
+  $('#btn-xray-update').classList.toggle('hidden', !data.update_available);
+  if (data.update_available) {
+    $('#btn-xray-update').textContent = `Обновить до ${data.latest}`;
+  } else if (check && data.latest) {
+    toast('Установлена последняя версия');
+  }
+}
+
+$('#btn-xray-check').addEventListener('click', async () => {
+  const btn = $('#btn-xray-check');
+  btn.disabled = true;
+  btn.textContent = 'Проверяем…';
+  try {
+    await loadXray(true);
+  } catch (err) { handle(err); }
+  finally {
+    btn.disabled = false;
+    btn.textContent = 'Проверить обновление';
+  }
+});
+
+$('#btn-xray-update').addEventListener('click', async () => {
+  if (!confirm(
+      `Клиент будет заменён на ${xrayLatest}, туннель перезапустится — связь прервётся на несколько секунд. ` +
+      'Прежняя версия сохранится и вернётся автоматически, если туннель не поднимется. Продолжить?')) {
+    return;
+  }
+
+  const log = $('#xray-log');
+  log.classList.remove('hidden');
+  log.textContent = '';
+  $('#btn-xray-update').disabled = true;
+  try {
+    await stream('/api/xray/update', {
+      onEvent: (event, data) => {
+        if (event === 'line') appendLog(log, data.line);
+        if (event === 'error') {
+          appendLog(log, `ОШИБКА: ${data.error}`);
+          toast(data.error, 'err');
+        }
+        if (event === 'done') {
+          appendLog(log, data.msg);
+          toast(data.msg);
+          loadXray().catch(handle);
+          loaders.overview().catch(handle);
+        }
+      },
+    });
+  } catch (err) { handle(err); }
+  finally { $('#btn-xray-update').disabled = false; }
+});
+
 $('#btn-logs').addEventListener('click', () => loaders.settings().catch(handle));
 
 loaders.settings = async () => {
+  // Версию клиента показываем сразу, а на GitHub ходим только по кнопке.
+  await loadXray();
   const r = await api('/api/logs?lines=200');
   $('#logs-view').textContent = r.lines.length ? r.lines.join('\n') : 'Журнал пуст';
   $('#logs-view').scrollTop = $('#logs-view').scrollHeight;

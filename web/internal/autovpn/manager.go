@@ -503,6 +503,21 @@ func (m *Manager) restartXray(ctx context.Context) error {
 	return nil
 }
 
+// RestartTunnel перезапускает xray и поднимает прокси-интерфейс, проверяя,
+// что туннель действительно ожил. Используется после замены бинарника.
+func (m *Manager) RestartTunnel(ctx context.Context) error {
+	if err := m.restartXray(ctx); err != nil {
+		return err
+	}
+	if err := m.waitProxy(ctx); err != nil {
+		return err
+	}
+	return m.raiseInterface(ctx)
+}
+
+// XrayBin возвращает путь к используемому клиенту xray.
+func (m *Manager) XrayBin() string { return m.xrayBin() }
+
 // raiseInterface поднимает прокси-интерфейс Keenetic, через который Квас
 // заворачивает трафик в туннель.
 func (m *Manager) raiseInterface(ctx context.Context) error {
