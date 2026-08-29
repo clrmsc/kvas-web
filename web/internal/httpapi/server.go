@@ -86,6 +86,9 @@ func (s *Server) Handler() http.Handler {
 	protected.HandleFunc("POST /api/subscription/check", s.handleSubscriptionCheck)
 	protected.HandleFunc("POST /api/subscription/apply", s.handleSubscriptionApply)
 
+	protected.HandleFunc("GET /api/update", s.handleUpdateStatus)
+	protected.HandleFunc("POST /api/update/install", s.handleUpdateInstall)
+
 	protected.HandleFunc("GET /api/xray", s.handleXrayStatus)
 	protected.HandleFunc("POST /api/xray/update", s.handleXrayUpdate)
 

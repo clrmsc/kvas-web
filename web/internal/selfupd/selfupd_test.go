@@ -1,0 +1,105 @@
+package selfupd
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestNeedsUpdate(t *testing.T) {
+	cases := []struct {
+		installed, latest string
+		want              bool
+	}{
+		{"1.1.9_beta-10-41", "1.1.9_beta-10-42", true},
+		{"1.1.9_beta-10-42", "1.1.9_beta-10-42", false},
+		{"", "1.1.9_beta-10-42", false}, // версия неизвестна — не навязываем
+		{"1.1.9_beta-10-41", "", false}, // не узнали последнюю — молчим
+	}
+	for _, c := range cases {
+		if got := NeedsUpdate(c.installed, c.latest); got != c.want {
+			t.Errorf("NeedsUpdate(%q, %q) = %v, ожидалось %v", c.installed, c.latest, got, c.want)
+		}
+	}
+}
+
+func TestLatestRejectsGarbage(t *testing.T) {
+	// GitHub при отсутствии файла отдаёт страницу с ошибкой — версией её
+	// считать нельзя.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "<!DOCTYPE html><html>Not Found</html>")
+	}))
+	defer srv.Close()
+
+	_, err := fetchVersion(context.Background(), srv.URL)
+	if err == nil {
+		t.Error("html вместо версии должен отвергаться")
+	}
+}
+
+func TestLatestReadsVersion(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "1.1.9_beta-10-42\n")
+	}))
+	defer srv.Close()
+
+	version, err := fetchVersion(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version != "1.1.9_beta-10-42" {
+		t.Errorf("получено %q", version)
+	}
+}
+
+func TestDownloadRejectsSmallFile(t *testing.T) {
+	// Вместо пакета может прийти страница с ошибкой — она заведомо мала.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "Not Found")
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	_, err := Download(context.Background(), Release{URL: srv.URL}, dir, nil)
+	if err == nil {
+		t.Fatal("неполный файл должен отвергаться")
+	}
+	if left, _ := os.ReadDir(dir); len(left) != 0 {
+		t.Errorf("после отказа не должно оставаться файлов, осталось %d", len(left))
+	}
+}
+
+func TestInstallRunsDetached(t *testing.T) {
+	dir := t.TempDir()
+	pkg := filepath.Join(dir, "kvas.ipk")
+	if err := os.WriteFile(pkg, []byte("пакет"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "update.log")
+
+	// Установка идёт отдельным процессом: вызов возвращается сразу, а
+	// работа продолжается сама.
+	start := time.Now()
+	if err := Install(pkg, logPath); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("вызов должен возвращаться сразу, занял %s", elapsed)
+	}
+
+	// Скрипт стартует с паузой; дожидаемся первых строк в журнале.
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		if data, err := os.ReadFile(logPath); err == nil && strings.Contains(string(data), "установка") {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Error("установка не записала ничего в журнал")
+}

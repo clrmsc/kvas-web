@@ -685,6 +685,95 @@ $('#password-form').addEventListener('submit', async (e) => {
   } catch (err) { handle(err); }
 });
 
+/* ---------------- Обновление Кваса ---------------- */
+
+let updateLatest = null;
+
+async function loadUpdate(check = false) {
+  const data = await api(`/api/update${check ? '?check=1' : ''}`);
+  updateLatest = data.latest ?? null;
+
+  const cards = [stat('Установлена', data.installed || 'неизвестно')];
+  if (data.latest) cards.push(stat('Доступна', data.latest));
+  if (data.check_error) cards.push(stat('Проверка не удалась', shortError(data.check_error)));
+  $('#update-status').innerHTML = cards.join('');
+
+  $('#btn-update-install').classList.toggle('hidden', !data.update_available);
+  if (data.update_available) {
+    $('#btn-update-install').textContent = `Обновить до ${data.latest}`;
+  } else if (check && data.latest) {
+    toast('Установлена последняя версия');
+  }
+}
+
+$('#btn-update-check').addEventListener('click', async () => {
+  const btn = $('#btn-update-check');
+  btn.disabled = true;
+  btn.textContent = 'Проверяем…';
+  try {
+    await loadUpdate(true);
+  } catch (err) { handle(err); }
+  finally {
+    btn.disabled = false;
+    btn.textContent = 'Проверить обновление';
+  }
+});
+
+$('#btn-update-install').addEventListener('click', async () => {
+  if (!confirm(
+      `Пакет будет обновлён до ${updateLatest}. Веб-интерфейс перезапустится и будет ` +
+      'недоступен около минуты; туннель при этом продолжит работать. Продолжить?')) {
+    return;
+  }
+
+  const log = $('#update-log');
+  log.classList.remove('hidden');
+  log.textContent = '';
+  $('#btn-update-install').disabled = true;
+  try {
+    await stream('/api/update/install', {
+      onEvent: (event, data) => {
+        if (event === 'line') appendLog(log, data.line);
+        if (event === 'error') {
+          appendLog(log, `ОШИБКА: ${data.error}`);
+          toast(data.error, 'err');
+        }
+        if (event === 'done') {
+          appendLog(log, data.msg);
+          if (data.updated) {
+            if (data.log) appendLog(log, `Журнал установки: ${data.log}`);
+            waitForRestart(log);
+          } else {
+            toast(data.msg);
+          }
+        }
+      },
+    });
+  } catch (err) { handle(err); }
+  finally { $('#btn-update-install').disabled = false; }
+});
+
+// Во время установки сервис останавливается, и запросы падают. Ждём, пока
+// он снова начнёт отвечать, и перезагружаем страницу — иначе в браузере
+// останется старый интерфейс от прежней версии.
+async function waitForRestart(log) {
+  appendLog(log, 'ждём перезапуска…');
+  for (let attempt = 0; attempt < 60; attempt++) {
+    await new Promise((r) => setTimeout(r, 3000));
+    try {
+      const res = await fetch('/api/auth/state', { cache: 'no-store' });
+      if (res.ok) {
+        appendLog(log, 'сервис поднялся, перезагружаем страницу');
+        setTimeout(() => location.reload(), 1200);
+        return;
+      }
+    } catch {
+      // Сервис ещё не поднялся — это ожидаемо, продолжаем ждать.
+    }
+  }
+  appendLog(log, 'сервис не ответил за три минуты — проверьте журнал установки');
+}
+
 /* ---------------- Клиент xray ---------------- */
 
 let xrayLatest = null;
@@ -758,7 +847,8 @@ $('#btn-xray-update').addEventListener('click', async () => {
 $('#btn-logs').addEventListener('click', () => loaders.settings().catch(handle));
 
 loaders.settings = async () => {
-  // Версию клиента показываем сразу, а на GitHub ходим только по кнопке.
+  // Версии показываем сразу, а на GitHub ходим только по кнопке.
+  await loadUpdate();
   await loadXray();
   const r = await api('/api/logs?lines=200');
   $('#logs-view').textContent = r.lines.length ? r.lines.join('\n') : 'Журнал пуст';

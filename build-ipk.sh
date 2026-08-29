@@ -303,3 +303,10 @@ echo "Версия пакета: ${PKG_VERSION}-${PKG_RELEASE}"
 for arch in ${ARCHES}; do
 	build_one "${arch}"
 done
+
+# Файл с версией выкладывается в релиз рядом с пакетами: по нему
+# веб-интерфейс на роутере понимает, что вышло обновление. Тег релиза для
+# этого не годится — он остаётся прежним, меняется только номер сборки.
+mkdir -p "${OUT_DIR}"
+printf '%s-%s\n' "${PKG_VERSION}" "${PKG_RELEASE}" > "${OUT_DIR}/version"
+echo "${OUT_DIR}/version ($(cat "${OUT_DIR}/version"))"

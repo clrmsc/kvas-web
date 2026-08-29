@@ -20,6 +20,7 @@ import (
 	"github.com/clrmsc/kvas-web/web/internal/config"
 	"github.com/clrmsc/kvas-web/web/internal/httpapi"
 	"github.com/clrmsc/kvas-web/web/internal/kvas"
+	"github.com/clrmsc/kvas-web/web/internal/selfupd"
 	"github.com/clrmsc/kvas-web/web/ui"
 )
 
@@ -35,6 +36,7 @@ func main() {
 
 func run(args []string) error {
 	checkOnly := false
+	updateOnly := false
 	filtered := make([]string, 0, len(args))
 	for _, a := range args {
 		switch a {
@@ -45,6 +47,9 @@ func run(args []string) error {
 			// Диагностический режим: проверить серверы подписки и выйти.
 			// Нужен, чтобы не дожидаться суточной проверки при отладке.
 			checkOnly = true
+		case "-update", "--update":
+			// Проверить обновление пакета и, если оно есть, поставить.
+			updateOnly = true
 		default:
 			filtered = append(filtered, a)
 		}
@@ -76,6 +81,9 @@ func run(args []string) error {
 
 	if checkOnly {
 		return runCheck(av)
+	}
+	if updateOnly {
+		return runSelfUpdate(cfg)
 	}
 
 	srv := &http.Server{
@@ -219,4 +227,48 @@ func trim(s string, limit int) string {
 		return s
 	}
 	return string(runes[:limit-1]) + "…"
+}
+
+// runSelfUpdate проверяет обновление пакета и ставит его, если оно есть.
+// Тот же путь, что и кнопка в интерфейсе, только из консоли.
+func runSelfUpdate(cfg config.Config) error {
+	ctx := context.Background()
+
+	installed := selfupd.Installed()
+	rel, err := selfupd.Latest(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("установлена: %s\nдоступна:    %s\n", orDashCLI(installed), rel.Version)
+
+	if !selfupd.NeedsUpdate(installed, rel.Version) {
+		fmt.Println("обновление не требуется")
+		return nil
+	}
+
+	fmt.Printf("скачиваем %s…\n", rel.Asset)
+	pkg, err := selfupd.Download(ctx, rel, cfg.StateDir, func(done, total int64) {
+		if total > 0 {
+			fmt.Printf("\rскачано %.0f%%", float64(done)/float64(total)*100)
+		}
+	})
+	if err != nil {
+		return err
+	}
+	fmt.Println()
+
+	updateLog := filepath.Join(filepath.Dir(cfg.LogFile), "kvas-web-update.log")
+	if err := selfupd.Install(pkg, updateLog); err != nil {
+		return err
+	}
+	fmt.Printf("установка запущена, журнал: %s\n", updateLog)
+	fmt.Println("веб-интерфейс перезапустится через несколько секунд")
+	return nil
+}
+
+func orDashCLI(v string) string {
+	if v == "" {
+		return "неизвестна"
+	}
+	return v
 }

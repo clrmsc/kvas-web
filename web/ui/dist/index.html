@@ -275,6 +275,21 @@
       </div>
 
       <div class="card">
+        <h2>Обновление Кваса</h2>
+        <p class="hint">
+          Проверяет, не вышла ли новая сборка пакета. Установка занимает
+          около минуты: в это время веб-интерфейс недоступен, страница
+          перезагрузится сама. Настройки, списки и подписка сохраняются.
+        </p>
+        <div class="grid-2" id="update-status"></div>
+        <div class="row" style="margin-top:12px">
+          <button class="btn" id="btn-update-check">Проверить обновление</button>
+          <button class="btn primary hidden" id="btn-update-install">Обновить</button>
+        </div>
+        <pre class="log hidden" id="update-log"></pre>
+      </div>
+
+      <div class="card">
         <h2>Клиент xray</h2>
         <p class="hint">
           Через него работает туннель. Провайдеры обновляют серверную часть
