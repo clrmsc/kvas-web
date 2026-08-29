@@ -29,32 +29,28 @@ func TestNeedsUpdate(t *testing.T) {
 	}
 }
 
-func TestLatestRejectsGarbage(t *testing.T) {
-	// GitHub при отсутствии файла отдаёт страницу с ошибкой — версией её
-	// считать нельзя.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "<!DOCTYPE html><html>Not Found</html>")
-	}))
-	defer srv.Close()
-
-	_, err := fetchVersion(context.Background(), srv.URL)
-	if err == nil {
-		t.Error("html вместо версии должен отвергаться")
+func TestParseReleaseAssets(t *testing.T) {
+	assets := []asset{
+		{Name: "kvas-aarch64.ipk", URL: "https://example/kvas-aarch64.ipk"},
+		{Name: "version-1.1.9_beta-10-43"},
+		{Name: "kvasweb-aarch64", URL: "https://example/kvasweb"},
 	}
-}
 
-func TestLatestReadsVersion(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "1.1.9_beta-10-42\n")
-	}))
-	defer srv.Close()
-
-	version, err := fetchVersion(context.Background(), srv.URL)
-	if err != nil {
-		t.Fatal(err)
+	version, url := pickFromAssets(assets, "kvas-aarch64.ipk")
+	if version != "1.1.9_beta-10-43" {
+		t.Errorf("версия разобрана как %q", version)
 	}
-	if version != "1.1.9_beta-10-42" {
-		t.Errorf("получено %q", version)
+	if url != "https://example/kvas-aarch64.ipk" {
+		t.Errorf("ссылка на пакет разобрана как %q", url)
+	}
+
+	// Метки версии нет — обновляться не на что.
+	if v, _ := pickFromAssets(assets[:1], "kvas-aarch64.ipk"); v != "" {
+		t.Errorf("без метки версия должна быть пустой, получено %q", v)
+	}
+	// Пакета под нашу архитектуру нет.
+	if _, u := pickFromAssets(assets, "kvas-mipsle.ipk"); u != "" {
+		t.Errorf("ссылка не должна находиться, получено %q", u)
 	}
 }
 

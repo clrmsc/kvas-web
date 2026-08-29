@@ -32,6 +32,13 @@
 > Управление: `kvas web {status|restart|off}` или
 > `/opt/etc/init.d/S99kvasweb`, журнал — `/opt/var/log/kvas-web.log`.
 >
+> ### Обновления
+>
+> Веб-интерфейс сам проверяет, не вышла ли новая сборка: **Настройки →
+> Обновление Кваса**. Установка занимает около минуты, страница
+> перезагрузится сама; настройки, списки и подписка сохраняются. Из консоли
+> то же самое делает `kvasweb -update`.
+>
 > ### Версия xray имеет значение
 >
 > Провайдеры обновляют серверную часть Reality, и старый клиент перестаёт
@@ -51,11 +58,17 @@
 >
 > Учтите: `opkg upgrade` вернёт версию из репозитория Entware.
 >
-> ### Сборка
+> ### Сборка и выкладка
 >
 > Пакет собирается без Entware buildroot: `make -C web all` собирает
 > бинарники веб-интерфейса, `sh build-ipk.sh` — сами ipk под каждую
-> архитектуру.
+> архитектуру. Публикация — `sh release.sh`: соберёт, выложит в релиз и
+> проверит, что в нём оказались все файлы (при ручной выкладке
+> `gh release upload --clobber` может удалить старые пакеты и прерваться,
+> оставив релиз без них).
+>
+> Не забывайте поднимать `PKG_RELEASE` в Makefile: по нему роутеры видят
+> обновление, а opkg отказывается ставить пакет с той же версией.
 
 ![GitHub Repo stars](https://img.shields.io/github/stars/qzeleza/kvas?color=orange) ![GitHub closed issues](https://img.shields.io/github/issues-closed/qzeleza/kvas?color=success) ![GitHub last commit](https://img.shields.io/github/last-commit/qzeleza/kvas) ![GitHub commit activity](https://img.shields.io/github/commit-activity/y/qzeleza/kvas) ![GitHub top language](https://img.shields.io/github/languages/top/qzeleza/kvas) ![GitHub code size in bytes](https://img.shields.io/github/languages/code-size/qzeleza/kvas) 
 # [КВАС](https://forum.keenetic.com/topic/14415-пробуем-квас-shadowsocks-и-другие-vpn-клиенты) - защита ваших подключений #

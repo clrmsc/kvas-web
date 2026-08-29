@@ -8,6 +8,7 @@ package selfupd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -20,10 +21,12 @@ import (
 )
 
 const (
-	repo        = "clrmsc/kvas-web"
-	baseURL     = "https://github.com/" + repo + "/releases/latest/download/"
-	maxPackage  = 32 << 20
-	packageName = "kvas"
+	repo       = "clrmsc/kvas-web"
+	releaseAPI = "https://api.github.com/repos/" + repo + "/releases/latest"
+	maxPackage = 32 << 20
+	// versionPrefix — начало имени файла-метки с версией сборки.
+	versionPrefix = "version-"
+	packageName   = "kvas"
 )
 
 // Release — сведения об опубликованном обновлении.
@@ -68,49 +71,71 @@ func Installed() string {
 }
 
 // Latest узнаёт версию, выложенную в последнем релизе.
+//
+// Версия берётся из имени файла-метки (version-1.1.9_beta-10-43), а список
+// файлов запрашивается через API: раздача релизов какое-то время отдаёт
+// прежнее содержимое по тому же имени, и свежая сборка выглядела бы как
+// «обновлений нет».
 func Latest(ctx context.Context) (Release, error) {
-	asset, err := assetForArch()
+	assetName, err := assetForArch()
 	if err != nil {
 		return Release{}, err
 	}
 
-	version, err := fetchVersion(ctx, baseURL+"version")
-	if err != nil {
-		return Release{}, err
-	}
-	return Release{Version: version, Asset: asset, URL: baseURL + asset}, nil
-}
-
-// fetchVersion читает файл с версией, выложенный рядом с пакетами.
-func fetchVersion(ctx context.Context, url string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, releaseAPI, nil)
 	if err != nil {
-		return "", err
+		return Release{}, err
 	}
+	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "kvas-web")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("не удалось проверить обновление: %w", err)
+		return Release{}, fmt.Errorf("не удалось проверить обновление: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("сервер обновлений ответил кодом %d", resp.StatusCode)
+		return Release{}, fmt.Errorf("сервер обновлений ответил кодом %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
-	if err != nil {
-		return "", err
+	var payload struct {
+		Assets []asset `json:"assets"`
 	}
-	version := strings.TrimSpace(string(body))
-	// Когда файла нет, GitHub отдаёт страницу с ошибкой — версией её считать
-	// нельзя, иначе интерфейс предложит «обновиться» на кусок html.
-	if version == "" || len(version) > 64 || strings.ContainsAny(version, " \t<>") {
-		return "", fmt.Errorf("сервер обновлений вернул неожиданный ответ")
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&payload); err != nil {
+		return Release{}, err
 	}
-	return version, nil
+
+	version, url := pickFromAssets(payload.Assets, assetName)
+	rel := Release{Asset: assetName, Version: version, URL: url}
+	if rel.Version == "" {
+		return rel, fmt.Errorf("в релизе нет метки версии")
+	}
+	if rel.URL == "" {
+		return rel, fmt.Errorf("в релизе нет пакета %s", assetName)
+	}
+	return rel, nil
+}
+
+// asset — файл, приложенный к релизу.
+type asset struct {
+	Name string `json:"name"`
+	URL  string `json:"browser_download_url"`
+}
+
+// pickFromAssets достаёт версию из имени файла-метки и ссылку на пакет
+// под нужную архитектуру.
+func pickFromAssets(assets []asset, want string) (version, url string) {
+	for _, a := range assets {
+		switch {
+		case strings.HasPrefix(a.Name, versionPrefix):
+			version = strings.TrimPrefix(a.Name, versionPrefix)
+		case a.Name == want:
+			url = a.URL
+		}
+	}
+	return version, url
 }
 
 // NeedsUpdate сообщает, отличается ли выложенная версия от установленной.
