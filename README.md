@@ -32,6 +32,25 @@
 > Управление: `kvas web {status|restart|off}` или
 > `/opt/etc/init.d/S99kvasweb`, журнал — `/opt/var/log/kvas-web.log`.
 >
+> ### Версия xray имеет значение
+>
+> Провайдеры обновляют серверную часть Reality, и старый клиент перестаёт
+> договариваться с частью серверов: в журнале это выглядит как
+> `REALITY: received real certificate`, а в списке — «туннель не работает».
+> В Entware `xray` нередко отстаёт на несколько версий. Текущая версия
+> показана на странице состояния; сверьте её с
+> [последним релизом Xray-core](https://github.com/XTLS/Xray-core/releases)
+> и при заметном отставании замените бинарник вручную:
+>
+> ```sh
+> cp /opt/sbin/xray /opt/sbin/xray.bak   # на случай отката
+> # скачать Xray-linux-<арх>.zip с github.com/XTLS/Xray-core/releases,
+> # распаковать и положить xray в /opt/sbin/, затем:
+> chmod 755 /opt/sbin/xray && /opt/etc/init.d/S24xray restart
+> ```
+>
+> Учтите: `opkg upgrade` вернёт версию из репозитория Entware.
+>
 > ### Сборка
 >
 > Пакет собирается без Entware buildroot: `make -C web all` собирает

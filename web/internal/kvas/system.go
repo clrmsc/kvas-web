@@ -2,9 +2,11 @@ package kvas
 
 import (
 	"bufio"
+	"context"
 	"encoding/hex"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -164,4 +166,26 @@ func AppendLine(path, line string) error {
 	}
 	body += line + "\n"
 	return WriteFileAtomic(path, []byte(body), 0o644)
+}
+
+// XrayVersion возвращает версию установленного xray одной строкой.
+// Показывается в интерфейсе: серверная часть Reality у провайдеров
+// обновляется, и старый клиент может перестать договариваться с частью
+// серверов — по версии это видно сразу.
+func XrayVersion(bin string) string {
+	if bin == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, bin, "version").Output()
+	if err != nil {
+		return ""
+	}
+	line, _, _ := strings.Cut(string(out), "\n")
+	fields := strings.Fields(line)
+	if len(fields) >= 2 && strings.EqualFold(fields[0], "xray") {
+		return fields[1]
+	}
+	return strings.TrimSpace(line)
 }

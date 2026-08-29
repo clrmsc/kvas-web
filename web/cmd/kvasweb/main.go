@@ -183,7 +183,13 @@ func runCheck(av *autovpn.Manager) error {
 			if res.SpeedStale {
 				stale = " (прошлый замер)"
 			}
-			fmt.Printf("%-34s %6.0f мс  %6.1f Мбит/с%s\n", name, res.Tunnel, res.Speed, stale)
+			// Пока туннель не проверен, задержки через него ещё нет —
+			// показывать её нулём было бы враньём.
+			if res.Tunnel > 0 {
+				fmt.Printf("%-34s %6.0f мс  %6.1f Мбит/с%s\n", name, res.Tunnel, res.Speed, stale)
+			} else {
+				fmt.Printf("%-34s %6s     %6.1f Мбит/с%s\n", name, "—", res.Speed, stale)
+			}
 		case res.SpeedError != "":
 			fmt.Printf("%-34s %6.0f мс  замер скорости не удался: %s\n",
 				name, res.Tunnel, res.SpeedError)

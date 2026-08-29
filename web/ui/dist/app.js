@@ -207,6 +207,7 @@ loaders.overview = async () => {
       s.interface ? `${s.interface}: ${s.interface_up ? 'поднят' : 'лежит'}` : 'не настроен'),
     stat('Резервный канал', s.failover === 'on' ? 'включён' : 'ручной режим'),
     s.subscription_server ? stat('Сервер из подписки', s.subscription_server) : '',
+    s.xray_version ? stat('Версия xray', s.xray_version) : '',
   ].join('');
 };
 

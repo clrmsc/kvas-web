@@ -31,6 +31,8 @@ type statusResponse struct {
 	SubscriptionServer string `json:"subscription_server,omitempty"`
 	// SetupFinished — прошёл ли Квас первичную настройку (kvas setup).
 	SetupFinished bool `json:"setup_finished"`
+	// XrayVersion — версия клиента, поднимающего туннель.
+	XrayVersion string `json:"xray_version,omitempty"`
 	// InterfaceUp — поднят ли прокси-интерфейс Keenetic. Если он лежит,
 	// трафик, размеченный в туннель, никуда не идёт.
 	InterfaceUp bool `json:"interface_up"`
@@ -66,6 +68,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		SubscriptionServer: s.autovpn.State().ActiveName,
 		SetupFinished:      kvas.SetupFinished(s.cfg.KvasConf),
 		InterfaceUp:        s.interfaceUp(r, conf["INFACE_CLI"]),
+		XrayVersion:        kvas.XrayVersion(kvas.FindFile(kvas.XrayBinCandidates...)),
 		VLESS: svc{
 			Running: kvas.ProcessRunning("xray"),
 			Tunnel:  kvas.PortListening(vlessSOCKSPort),
