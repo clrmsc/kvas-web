@@ -13,34 +13,38 @@ import (
 	"github.com/clrmsc/kvas-web/web/internal/autovpn"
 	"github.com/clrmsc/kvas-web/web/internal/config"
 	"github.com/clrmsc/kvas-web/web/internal/kvas"
+	"github.com/clrmsc/kvas-web/web/internal/networks"
 )
 
 const sessionCookie = "kvasweb_session"
 
 // Server связывает конфигурацию, менеджер сессий и клиент CLI.
 type Server struct {
-	cfg     config.Config
-	auth    *auth.Manager
-	kvas    *kvas.Client
-	autovpn *autovpn.Manager
-	log     *slog.Logger
-	static  fs.FS
-	secure  bool // отдавать ли cookie с флагом Secure (включён TLS)
+	cfg      config.Config
+	auth     *auth.Manager
+	kvas     *kvas.Client
+	autovpn  *autovpn.Manager
+	networks *networks.Store
+	log      *slog.Logger
+	static   fs.FS
+	secure   bool // отдавать ли cookie с флагом Secure (включён TLS)
 }
 
 // timeNow вынесен переменной, чтобы тесты могли зафиксировать время.
 var timeNow = time.Now
 
 // New собирает сервер. static — файловая система с собранным SPA.
-func New(cfg config.Config, am *auth.Manager, av *autovpn.Manager, log *slog.Logger, static fs.FS) *Server {
+func New(cfg config.Config, am *auth.Manager, av *autovpn.Manager, nets *networks.Store,
+	log *slog.Logger, static fs.FS) *Server {
 	return &Server{
-		cfg:     cfg,
-		auth:    am,
-		kvas:    kvas.NewClient(cfg.KvasBin),
-		autovpn: av,
-		log:     log,
-		static:  static,
-		secure:  cfg.TLSCert != "" && cfg.TLSKey != "",
+		cfg:      cfg,
+		auth:     am,
+		kvas:     kvas.NewClient(cfg.KvasBin),
+		autovpn:  av,
+		networks: nets,
+		log:      log,
+		static:   static,
+		secure:   cfg.TLSCert != "" && cfg.TLSKey != "",
 	}
 }
 
@@ -64,6 +68,11 @@ func (s *Server) Handler() http.Handler {
 	protected.HandleFunc("DELETE /api/hosts/{domain}", s.handleHostDel)
 	protected.HandleFunc("POST /api/hosts/import", s.handleHostsImport)
 	protected.HandleFunc("GET /api/hosts/export", s.handleHostsExport)
+
+	protected.HandleFunc("GET /api/networks", s.handleNetworksList)
+	protected.HandleFunc("POST /api/networks", s.handleNetworkAdd)
+	protected.HandleFunc("DELETE /api/networks/{net}", s.handleNetworkDel)
+	protected.HandleFunc("POST /api/networks/telegram", s.handleNetworksTelegram)
 
 	protected.HandleFunc("GET /api/tags", s.handleTagsList)
 	protected.HandleFunc("POST /api/tags/{tag}/enable", s.handleTagEnable)

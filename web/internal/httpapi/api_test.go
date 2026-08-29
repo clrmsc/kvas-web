@@ -16,6 +16,7 @@ import (
 	"github.com/clrmsc/kvas-web/web/internal/auth"
 	"github.com/clrmsc/kvas-web/web/internal/autovpn"
 	"github.com/clrmsc/kvas-web/web/internal/config"
+	"github.com/clrmsc/kvas-web/web/internal/networks"
 )
 
 const testPassword = "тестовый-пароль"
@@ -72,7 +73,8 @@ func newTestServer(t *testing.T) (*httptest.Server, config.Config, string) {
 		t.Fatal(err)
 	}
 
-	srv := httptest.NewServer(New(cfg, am, av, log, static).Handler())
+	nets := networks.New(filepath.Join(dir, "networks.list"))
+	srv := httptest.NewServer(New(cfg, am, av, nets, log, static).Handler())
 	t.Cleanup(srv.Close)
 	return srv, cfg, calls
 }
@@ -295,7 +297,7 @@ func TestSetupRejectedFromInternet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := New(cfg, am, av, log,
+	h := New(cfg, am, av, networks.New(filepath.Join(cfg.StateDir, "networks.list")), log,
 		fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("x")}}).Handler()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup",
@@ -325,7 +327,7 @@ func TestSetupAllowedFromLAN(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := New(cfg, am, av, log,
+	h := New(cfg, am, av, networks.New(filepath.Join(cfg.StateDir, "networks.list")), log,
 		fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("x")}}).Handler()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup",

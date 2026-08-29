@@ -97,6 +97,9 @@ func (c Config) PassFile() string { return filepath.Join(c.StateDir, "password")
 // последней проверки.
 func (c Config) SubscriptionFile() string { return filepath.Join(c.StateDir, "subscription.json") }
 
+// NetworksFile — подсети, которые заворачиваются в туннель помимо доменов.
+func (c Config) NetworksFile() string { return filepath.Join(c.StateDir, "networks.list") }
+
 // SessionFile — файл, куда сохраняются активные сессии, чтобы перезапуск
 // сервиса не разлогинивал пользователя.
 func (c Config) SessionFile() string { return filepath.Join(c.StateDir, "sessions") }

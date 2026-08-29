@@ -266,7 +266,57 @@ loaders.hosts = async () => {
   allHosts = r.hosts;
   $('#hosts-count').textContent = `(${allHosts.length})`;
   renderHosts();
+  await loadNetworks();
 };
+
+async function loadNetworks() {
+  const r = await api('/api/networks');
+  const list = $('#networks-list');
+  list.innerHTML = r.networks.length
+    ? r.networks.map((n) => `
+        <div class="item">
+          <span class="name">${esc(n)}</span>
+          <button class="btn small danger" data-del-net="${esc(n)}">Удалить</button>
+        </div>`).join('')
+    : '<div class="empty">Подсетей нет</div>';
+}
+
+$('#network-add-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const input = $('#network-input');
+  try {
+    const r = await api('/api/networks', { method: 'POST', body: { networks: input.value } });
+    toast(r.msg);
+    input.value = '';
+    await loadNetworks();
+  } catch (err) { handle(err); }
+});
+
+$('#btn-telegram').addEventListener('click', async () => {
+  const btn = $('#btn-telegram');
+  btn.disabled = true;
+  btn.textContent = 'Загружаем…';
+  try {
+    const r = await api('/api/networks/telegram', { method: 'POST' });
+    toast(r.msg);
+    await loadNetworks();
+  } catch (err) { handle(err); }
+  finally {
+    btn.disabled = false;
+    btn.textContent = 'Подсети Telegram';
+  }
+});
+
+$('#networks-list').addEventListener('click', async (e) => {
+  const net = e.target.dataset?.delNet;
+  if (!net) return;
+  e.target.disabled = true;
+  try {
+    const r = await api(`/api/networks/${encodeURIComponent(net)}`, { method: 'DELETE' });
+    toast(r.msg);
+    await loadNetworks();
+  } catch (err) { handle(err); e.target.disabled = false; }
+});
 
 function renderHosts() {
   const filter = $('#host-filter').value.trim().toLowerCase();

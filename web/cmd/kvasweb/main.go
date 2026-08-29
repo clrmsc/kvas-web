@@ -20,6 +20,7 @@ import (
 	"github.com/clrmsc/kvas-web/web/internal/config"
 	"github.com/clrmsc/kvas-web/web/internal/httpapi"
 	"github.com/clrmsc/kvas-web/web/internal/kvas"
+	"github.com/clrmsc/kvas-web/web/internal/networks"
 	"github.com/clrmsc/kvas-web/web/internal/selfupd"
 	"github.com/clrmsc/kvas-web/web/ui"
 )
@@ -86,9 +87,11 @@ func run(args []string) error {
 		return runSelfUpdate(cfg)
 	}
 
+	nets := networks.New(cfg.NetworksFile())
+
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           httpapi.New(cfg, am, av, logger, ui.FS()).Handler(),
+		Handler:           httpapi.New(cfg, am, av, nets, logger, ui.FS()).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		// Пишущий таймаут не ставим: импорт списков и обновление отдают
 		// прогресс потоком и могут идти минутами.
@@ -100,6 +103,18 @@ func run(args []string) error {
 
 	// Суточная проверка серверов подписки живёт столько же, сколько сервис.
 	go av.RunScheduler(ctx)
+
+	// Подсети возвращаем в таблицу регулярно: её пересоздаёт `kvas init`,
+	// а после перезагрузки роутера она и вовсе пуста.
+	go nets.KeepApplied(ctx, 10*time.Minute, func(n int, err error) {
+		if err != nil {
+			logger.Warn("подсети не применены", "err", err)
+			return
+		}
+		if n > 0 {
+			logger.Info("подсети применены", "количество", n)
+		}
+	})
 
 	// Пути к файлам Кваса различаются между установками, поэтому пишем
 	// в журнал то, что сервис нашёл: по этой строке видно, почему,
