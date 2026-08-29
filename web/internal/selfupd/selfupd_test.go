@@ -1,6 +1,9 @@
 package selfupd
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"fmt"
 	"net/http"
@@ -98,4 +101,66 @@ func TestInstallRunsDetached(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 	}
 	t.Error("установка не записала ничего в журнал")
+}
+
+func TestPackageVersion(t *testing.T) {
+	dir := t.TempDir()
+	pkg := filepath.Join(dir, "kvas.ipk")
+	buildIPK(t, pkg, "Package: kvas\nVersion: 1.1.9_beta-10-44\nArchitecture: all\n")
+
+	got, err := PackageVersion(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "1.1.9_beta-10-44" {
+		t.Errorf("получено %q", got)
+	}
+}
+
+func TestPackageVersionRejectsForeignFile(t *testing.T) {
+	dir := t.TempDir()
+	notPkg := filepath.Join(dir, "readme.txt")
+	if err := os.WriteFile(notPkg, []byte("просто текст"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PackageVersion(notPkg); err == nil {
+		t.Error("посторонний файл не должен разбираться как пакет")
+	}
+}
+
+// buildIPK собирает минимальный пакет: tar.gz с control.tar.gz внутри —
+// ровно тот формат, что использует Entware.
+func buildIPK(t *testing.T, path, control string) {
+	t.Helper()
+
+	var inner bytes.Buffer
+	izw := gzip.NewWriter(&inner)
+	itw := tar.NewWriter(izw)
+	if err := itw.WriteHeader(&tar.Header{Name: "./control", Size: int64(len(control)), Mode: 0o644}); err != nil {
+		t.Fatal(err)
+	}
+	itw.Write([]byte(control))
+	itw.Close()
+	izw.Close()
+
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+
+	zw := gzip.NewWriter(f)
+	tw := tar.NewWriter(zw)
+	for name, body := range map[string][]byte{
+		"./debian-binary":  []byte("2.0\n"),
+		"./control.tar.gz": inner.Bytes(),
+		"./data.tar.gz":    []byte("не важно"),
+	} {
+		if err := tw.WriteHeader(&tar.Header{Name: name, Size: int64(len(body)), Mode: 0o644}); err != nil {
+			t.Fatal(err)
+		}
+		tw.Write(body)
+	}
+	tw.Close()
+	zw.Close()
 }

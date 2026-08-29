@@ -257,6 +257,18 @@ func runSelfUpdate(cfg config.Config) error {
 	}
 	fmt.Println()
 
+	got, err := selfupd.PackageVersion(pkg)
+	if err != nil {
+		os.Remove(pkg)
+		return err
+	}
+	if got != rel.Version {
+		os.Remove(pkg)
+		return fmt.Errorf("скачан пакет версии %s вместо %s — сборка ещё раздаётся, попробуйте через несколько минут",
+			got, rel.Version)
+	}
+	fmt.Printf("пакет проверен: версия %s\n", got)
+
 	updateLog := filepath.Join(filepath.Dir(cfg.LogFile), "kvas-web-update.log")
 	if err := selfupd.Install(pkg, updateLog); err != nil {
 		return err

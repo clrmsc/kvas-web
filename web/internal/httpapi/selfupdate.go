@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -86,6 +87,23 @@ func (s *Server) handleUpdateInstall(w http.ResponseWriter, r *http.Request) {
 		send("error", map[string]string{"error": err.Error()})
 		return
 	}
+
+	// Раздача GitHub какое-то время отдаёт прежний файл, поэтому сверяем
+	// версию внутри пакета: иначе молча переустановили бы то же самое.
+	got, err := selfupd.PackageVersion(pkg)
+	if err != nil {
+		os.Remove(pkg)
+		send("error", map[string]string{"error": err.Error()})
+		return
+	}
+	if got != rel.Version {
+		os.Remove(pkg)
+		send("error", map[string]string{"error": fmt.Sprintf(
+			"скачан пакет версии %s вместо %s — сборка ещё раздаётся, попробуйте через несколько минут",
+			got, rel.Version)})
+		return
+	}
+	line("пакет проверен: версия %s", got)
 
 	updateLog := filepath.Join(filepath.Dir(s.cfg.LogFile), "kvas-web-update.log")
 	if err := selfupd.Install(pkg, updateLog); err != nil {

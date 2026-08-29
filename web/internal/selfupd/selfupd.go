@@ -7,6 +7,9 @@
 package selfupd
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -183,6 +186,57 @@ func Download(ctx context.Context, rel Release, dir string, progress func(done, 
 		return "", fmt.Errorf("скачан неполный файл (%d байт)", written)
 	}
 	return tmp.Name(), nil
+}
+
+// PackageVersion читает версию из скачанного пакета. Формат ipk у Entware —
+// tar.gz с control.tar.gz внутри, а в нём файл control с полем Version.
+func PackageVersion(path string) (string, error) {
+	outer, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer outer.Close()
+
+	control, err := findInTarGz(outer, "control.tar.gz")
+	if err != nil {
+		return "", fmt.Errorf("это не похоже на пакет ipk: %w", err)
+	}
+	text, err := findInTarGz(bytes.NewReader(control), "control")
+	if err != nil {
+		return "", fmt.Errorf("в пакете нет описания: %w", err)
+	}
+
+	for _, line := range strings.Split(string(text), "\n") {
+		if v, ok := strings.CutPrefix(line, "Version:"); ok {
+			return strings.TrimSpace(v), nil
+		}
+	}
+	return "", fmt.Errorf("в описании пакета нет версии")
+}
+
+// findInTarGz достаёт из tar.gz файл с указанным именем, не обращая
+// внимания на ведущее «./».
+func findInTarGz(r io.Reader, name string) ([]byte, error) {
+	zr, err := gzip.NewReader(r)
+	if err != nil {
+		return nil, err
+	}
+	defer zr.Close()
+
+	tr := tar.NewReader(zr)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return nil, fmt.Errorf("файл %s не найден", name)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimPrefix(hdr.Name, "./") != name {
+			continue
+		}
+		return io.ReadAll(io.LimitReader(tr, maxPackage))
+	}
 }
 
 // Install запускает установку пакета отдельным процессом и возвращает
