@@ -472,3 +472,40 @@ func TestImportCanReplaceListExplicitly(t *testing.T) {
 		t.Errorf("для замены списка ожидался вызов import, получено: %q\nответ: %s", logged, body)
 	}
 }
+
+func TestXrayStatusRequiresAuthAndReportsVersion(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+
+	// Без сессии — отказ, как и у остальных операций.
+	resp, err := http.Get(srv.URL + "/api/xray")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("без входа ожидался код 401, получено %d", resp.StatusCode)
+	}
+
+	client := login(t, srv)
+	resp, err = client.Get(srv.URL + "/api/xray")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("статус xray вернул %d", resp.StatusCode)
+	}
+
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["ok"] != true {
+		t.Errorf("неожиданный ответ: %v", payload)
+	}
+	// Без параметра check на GitHub не ходим — поля о последней версии
+	// появляться не должны.
+	if _, ok := payload["latest"]; ok {
+		t.Error("проверка обновления не должна выполняться без запроса")
+	}
+}
