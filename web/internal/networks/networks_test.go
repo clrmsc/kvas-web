@@ -117,3 +117,32 @@ func contains(haystack, needle string) bool {
 	}
 	return false
 }
+
+func TestApplySkipsUnusableEntries(t *testing.T) {
+	s, calls := storeWithFakeIpset(t)
+
+	// В готовых списках рядом с IPv4 попадаются адреса IPv6, а таблица
+	// Кваса их не принимает. Одна такая строка не должна мешать остальным.
+	body := "91.108.4.0/22\n2001:b28:f23d::/48\n149.154.160.0/20\n"
+	if err := os.WriteFile(s.Path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := s.Apply()
+	if n != 2 {
+		t.Errorf("пригодных записей должно быть 2, получено %d", n)
+	}
+	if err == nil {
+		t.Error("о пропущенной записи нужно сообщать")
+	}
+
+	logged, _ := os.ReadFile(calls)
+	for _, want := range []string{"91.108.4.0/22", "149.154.160.0/20"} {
+		if !contains(string(logged), want) {
+			t.Errorf("подсеть %s должна была примениться:\n%s", want, logged)
+		}
+	}
+	if contains(string(logged), "2001:") {
+		t.Error("адрес IPv6 не должен передаваться в ipset")
+	}
+}

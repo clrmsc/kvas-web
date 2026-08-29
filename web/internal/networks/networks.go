@@ -148,6 +148,7 @@ func (s *Store) Remove(item string) error {
 
 // Apply добавляет сохранённые подсети в таблицу. Вызывается при запуске и
 // по расписанию: `kvas init` пересоздаёт таблицу и стирает наши записи.
+// Возвращает число применённых записей.
 func (s *Store) Apply() (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -159,20 +160,41 @@ func (s *Store) Apply() (int, error) {
 	if len(items) == 0 {
 		return 0, nil
 	}
-	return len(items), s.applyLocked(items)
+
+	// Считаем только пригодные: в файл могли попасть чужие строки, например
+	// адреса IPv6 из готовых списков.
+	usable := 0
+	for _, item := range items {
+		if _, err := normalize(item); err == nil {
+			usable++
+		}
+	}
+	return usable, s.applyLocked(items)
 }
 
+// applyLocked добавляет подсети в таблицу. Негодная запись пропускается,
+// а не прерывает работу: из-за одной строки (например, IPv6, которую
+// таблица Кваса не принимает) остальные подсети остались бы неприменёнными.
 func (s *Store) applyLocked(items []string) error {
 	if s.IpsetBin == "" {
 		return fmt.Errorf("не найден ipset")
 	}
+
+	var failed []string
 	for _, net := range items {
+		if _, err := normalize(net); err != nil {
+			failed = append(failed, net)
+			continue
+		}
 		// timeout 0 — запись без срока: у таблицы Кваса записи живут сутки,
 		// а подсети должны оставаться, пока их не убрали из списка.
 		out, err := exec.Command(s.IpsetBin, "add", s.TableName, net, "timeout", "0", "-exist").CombinedOutput()
 		if err != nil {
-			return fmt.Errorf("не удалось добавить %s: %s", net, strings.TrimSpace(string(out)))
+			failed = append(failed, fmt.Sprintf("%s (%s)", net, strings.TrimSpace(string(out))))
 		}
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("не применены: %s", strings.Join(failed, ", "))
 	}
 	return nil
 }
