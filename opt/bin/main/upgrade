@@ -224,7 +224,13 @@ kvas_conf=/opt/etc/kvas.conf
 # Вычисляем текущую ширину экрана для печати линий определенной ширины
 length=$(stty size 2>/dev/null | cut -d' ' -f2)
 # длина распечатываемой линии символов будет меньше на 12 символов чем ширина экрана
-[ "${length}" -gt 80 ] && WIDTH=$((length*2/3)) || WIDTH=68
+# При запуске без терминала (например, из веб-интерфейса) stty ничего не
+# возвращает, и сравнение падало с «bad number».
+if [ -n "${length}" ] && [ "${length}" -gt 80 ] 2>/dev/null; then
+	WIDTH=$((length*2/3))
+else
+	WIDTH=68
+fi
 
 sed -i 's/\(export TERM=\).*/\1xterm-256color/' /opt/etc/profile
 
