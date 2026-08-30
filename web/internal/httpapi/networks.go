@@ -89,6 +89,29 @@ func (s *Server) handleNetworksTelegram(w http.ResponseWriter, r *http.Request) 
 	writeOK(w, fmt.Sprintf("подсетей Telegram: %d, из них новых: %d", len(v4), added))
 }
 
+// discordCIDR — блок, зарегистрированный на Discord Inc. (RIPE:
+// US-DISCORD1). В нём живут голосовые серверы: клиент шлёт на них UDP,
+// получив адрес от API, поэтому список доменов такой трафик не ловит.
+//
+// Списка подсетей по ссылке у Discord нет — сам сервис называет этот
+// диапазон в требованиях к сетевым экранам.
+var discordCIDR = []string{"66.22.192.0/18"}
+
+// handleNetworksDiscord добавляет подсети голосовых серверов Discord.
+func (s *Server) handleNetworksDiscord(w http.ResponseWriter, r *http.Request) {
+	added, err := s.networks.Add(discordCIDR)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	s.log.Info("добавлены подсети Discord", "всего", len(discordCIDR), "новых", added)
+	if added == 0 {
+		writeOK(w, "подсети Discord уже добавлены")
+		return
+	}
+	writeOK(w, fmt.Sprintf("подсетей Discord: %d, из них новых: %d", len(discordCIDR), added))
+}
+
 // fetchThroughTunnel скачивает страницу, при неудаче повторяя запрос через
 // туннель: часть нужных адресов из России напрямую недоступна — например,
 // сам список подсетей Telegram.

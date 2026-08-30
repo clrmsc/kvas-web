@@ -34,6 +34,18 @@ func fakeKvas(t *testing.T, dir string) (bin, calls string) {
 	return bin, calls
 }
 
+// fakeIpset изображает ipset: команды принимаются молча, «список» всегда
+// пуст, а сами вызовы складываются в ipset.log рядом.
+func fakeIpset(t *testing.T, dir string) string {
+	t.Helper()
+	bin := filepath.Join(dir, "ipset")
+	script := "#!/bin/sh\necho \"$@\" >> " + filepath.Join(dir, "ipset.log") + "\nexit 0\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin
+}
+
 func newTestServer(t *testing.T) (*httptest.Server, config.Config, string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -73,7 +85,11 @@ func newTestServer(t *testing.T) (*httptest.Server, config.Config, string) {
 		t.Fatal(err)
 	}
 
-	nets := networks.New(filepath.Join(dir, "networks.list"))
+	nets := networks.New(cfg.NetworksFile())
+	// На машине разработчика ipset нет, а без него подсети не применяются
+	// и обработчики отвечают ошибкой. Подменяем заглушкой, которая
+	// записывает вызовы.
+	nets.IpsetBin = fakeIpset(t, dir)
 	srv := httptest.NewServer(New(cfg, am, av, nets, log, static).Handler())
 	t.Cleanup(srv.Close)
 	return srv, cfg, calls
@@ -573,5 +589,48 @@ func getJSON(t *testing.T, client *http.Client, url string, into any) {
 	}
 	if err := json.NewDecoder(resp.Body).Decode(into); err != nil {
 		t.Fatalf("ответ %s не разобран: %v", url, err)
+	}
+}
+
+// Кнопка подсетей Discord добавляет диапазон голосовых серверов и не
+// плодит дублей при повторном нажатии.
+func TestNetworksDiscordAddsVoiceRange(t *testing.T) {
+	srv, cfg, _ := newTestServer(t)
+	client := login(t, srv)
+
+	post := func() string {
+		resp, err := client.Post(srv.URL+"/api/networks/discord", "application/json", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("подсети Discord вернули %d", resp.StatusCode)
+		}
+		var body struct {
+			Msg string `json:"msg"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		return body.Msg
+	}
+
+	post()
+	saved, err := os.ReadFile(cfg.NetworksFile())
+	if err != nil {
+		t.Fatalf("список подсетей не сохранён: %v", err)
+	}
+	if !strings.Contains(string(saved), "66.22.192.0/18") {
+		t.Errorf("диапазон Discord не записан: %q", saved)
+	}
+
+	msg := post()
+	again, _ := os.ReadFile(cfg.NetworksFile())
+	if strings.Count(string(again), "66.22.192.0/18") != 1 {
+		t.Errorf("повторное нажатие продублировало подсеть: %q", again)
+	}
+	if !strings.Contains(msg, "уже добавлены") {
+		t.Errorf("о повторе сказано невнятно: %q", msg)
 	}
 }

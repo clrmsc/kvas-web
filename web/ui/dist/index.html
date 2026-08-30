@@ -116,15 +116,17 @@
         <h2>Подсети</h2>
         <p class="hint">
           Некоторые программы ходят к своим серверам по зашитым адресам, не
-          спрашивая DNS, — так делает Telegram. Домены им не помогают: адрес
-          не попадает в таблицу, и трафик идёт мимо туннеля. Такие диапазоны
-          добавляются сюда и восстанавливаются после перезагрузки роутера.
+          спрашивая DNS, — так делает Telegram, а Discord тем же способом
+          отдаёт голосовые серверы. Домены им не помогают: адрес не попадает
+          в таблицу, и трафик идёт мимо туннеля. Такие диапазоны добавляются
+          сюда и восстанавливаются после перезагрузки роутера.
         </p>
         <form class="row" id="network-add-form">
           <input type="text" id="network-input" class="grow" placeholder="91.108.4.0/22"
                  autocapitalize="none" autocorrect="off" spellcheck="false" required>
           <button class="btn primary" type="submit">Добавить</button>
           <button class="btn" type="button" id="btn-telegram">Подсети Telegram</button>
+          <button class="btn" type="button" id="btn-discord">Подсети Discord</button>
         </form>
         <div class="list" id="networks-list" style="margin-top:10px"></div>
       </div>

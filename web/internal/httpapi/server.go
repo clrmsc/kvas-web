@@ -73,6 +73,7 @@ func (s *Server) Handler() http.Handler {
 	protected.HandleFunc("POST /api/networks", s.handleNetworkAdd)
 	protected.HandleFunc("DELETE /api/networks/{net}", s.handleNetworkDel)
 	protected.HandleFunc("POST /api/networks/telegram", s.handleNetworksTelegram)
+	protected.HandleFunc("POST /api/networks/discord", s.handleNetworksDiscord)
 
 	protected.HandleFunc("GET /api/tags", s.handleTagsList)
 	protected.HandleFunc("POST /api/tags/{tag}/enable", s.handleTagEnable)

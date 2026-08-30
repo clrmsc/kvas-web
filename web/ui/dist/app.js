@@ -292,20 +292,25 @@ $('#network-add-form').addEventListener('submit', async (e) => {
   } catch (err) { handle(err); }
 });
 
-$('#btn-telegram').addEventListener('click', async () => {
-  const btn = $('#btn-telegram');
-  btn.disabled = true;
-  btn.textContent = 'Загружаем…';
-  try {
-    const r = await api('/api/networks/telegram', { method: 'POST' });
-    toast(r.msg);
-    await loadNetworks();
-  } catch (err) { handle(err); }
-  finally {
-    btn.disabled = false;
-    btn.textContent = 'Подсети Telegram';
-  }
-});
+// Готовые наборы подсетей: у Telegram список берётся с его сайта,
+// у Discord — зашит, своего списка сервис не публикует.
+for (const [id, path] of [['#btn-telegram', 'telegram'], ['#btn-discord', 'discord']]) {
+  $(id).addEventListener('click', async () => {
+    const btn = $(id);
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Загружаем…';
+    try {
+      const r = await api(`/api/networks/${path}`, { method: 'POST' });
+      toast(r.msg);
+      await loadNetworks();
+    } catch (err) { handle(err); }
+    finally {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  });
+}
 
 $('#networks-list').addEventListener('click', async (e) => {
   const net = e.target.dataset?.delNet;
