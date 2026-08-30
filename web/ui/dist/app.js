@@ -449,6 +449,17 @@ loaders.subscription = async () => {
   renderSubscription();
 };
 
+// liveStatusText описывает последнюю проверку связи одной строкой.
+function liveStatusText(s) {
+  if (!s.live_check) return 'выключена';
+  if (!s.live_at) return 'ещё не проверялась';
+  if (s.live_ok) {
+    const ms = s.live_ms ? ` · ${Math.round(s.live_ms)} мс` : '';
+    return `${s.live_at} · есть${ms}`;
+  }
+  return `${s.live_at} · ${s.live_error || 'нет связи'}`;
+}
+
 function renderSubscription() {
   const s = subState;
 
@@ -460,10 +471,14 @@ function renderSubscription() {
   $('#sub-autoapply').checked = s.auto_apply;
   $('#sub-time').value = normalizeTime(s.check_time);
   $('#sub-topn').value = String(s.speed_top_n);
+  $('#sub-live').checked = s.live_check;
+  $('#sub-live-every').value = String(s.live_every_minutes || 5);
+  $('#sub-live-status').textContent = liveStatusText(s);
 
   $('#sub-status').innerHTML = [
     stat('Активный сервер', s.active_name || 'не выбран'),
     stat('Переключён', s.applied_at || '—'),
+    stat('Связь через туннель', s.live_check ? liveStatusText(s) : 'не проверяется'),
     stat('Последняя проверка', s.last_check || 'ещё не было'),
     stat('Следующая проверка', s.next_check || (s.enabled ? '—' : 'выключена')),
   ].join('');
@@ -585,6 +600,20 @@ $('#sub-save-schedule').addEventListener('click', async () => {
     });
     renderSubscription();
     toast('Расписание сохранено');
+  } catch (err) { handle(err); }
+});
+
+$('#sub-save-live').addEventListener('click', async () => {
+  try {
+    subState = await api('/api/subscription', {
+      method: 'POST',
+      body: {
+        live_check: $('#sub-live').checked,
+        live_every_minutes: Number($('#sub-live-every').value),
+      },
+    });
+    renderSubscription();
+    toast($('#sub-live').checked ? 'Контроль связи включён' : 'Контроль связи выключен');
   } catch (err) { handle(err); }
 });
 

@@ -511,3 +511,67 @@ func TestXrayStatusRequiresAuthAndReportsVersion(t *testing.T) {
 		t.Error("проверка обновления не должна выполняться без запроса")
 	}
 }
+
+// Настройки контроля связи должны сохраняться и возвращаться, а негодный
+// период — отклоняться: сторож с нулевым интервалом крутился бы вхолостую.
+func TestLiveCheckSettingsRoundTrip(t *testing.T) {
+	srv, _, _ := newTestServer(t)
+	client := login(t, srv)
+
+	var initial struct {
+		LiveCheck bool `json:"live_check"`
+		LiveEvery int  `json:"live_every_minutes"`
+	}
+	getJSON(t, client, srv.URL+"/api/subscription", &initial)
+	if !initial.LiveCheck || initial.LiveEvery != 5 {
+		t.Errorf("по умолчанию ждали включённую проверку раз в 5 минут, получили %+v", initial)
+	}
+
+	resp, err := client.Post(srv.URL+"/api/subscription", "application/json",
+		strings.NewReader(`{"live_check":false,"live_every_minutes":30}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("сохранение настроек вернуло %d", resp.StatusCode)
+	}
+
+	var saved struct {
+		LiveCheck bool   `json:"live_check"`
+		LiveEvery int    `json:"live_every_minutes"`
+		CheckTime string `json:"check_time"`
+	}
+	getJSON(t, client, srv.URL+"/api/subscription", &saved)
+	if saved.LiveCheck || saved.LiveEvery != 30 {
+		t.Errorf("настройки не сохранились: %+v", saved)
+	}
+	if saved.CheckTime != "04:30" {
+		t.Errorf("время суточной проверки затёрлось: %q", saved.CheckTime)
+	}
+
+	resp, err = client.Post(srv.URL+"/api/subscription", "application/json",
+		strings.NewReader(`{"live_every_minutes":0}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("нулевой период вернул %d, ожидалось 400", resp.StatusCode)
+	}
+}
+
+func getJSON(t *testing.T, client *http.Client, url string, into any) {
+	t.Helper()
+	resp, err := client.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("%s вернул %d", url, resp.StatusCode)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(into); err != nil {
+		t.Fatalf("ответ %s не разобран: %v", url, err)
+	}
+}

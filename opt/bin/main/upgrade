@@ -337,7 +337,11 @@ ready 'Загружаем пакет...'
 
 	cd /opt/packages
 	rm -f "/opt/packages/${package_name}"
-	curl -sOL "${package_url}"
+#	Имя файла в релизе постоянное, поэтому CDN GitHub отдаёт по нему
+#	предыдущую сборку ещё несколько часов. Добавляем к ссылке метку
+#	времени и просим не отдавать из кэша — иначе обновление молча
+#	установит ту же версию, что уже стоит.
+	curl -s -L -H 'Cache-Control: no-cache' -o "${package_name}" "${package_url}?t=$(date +%s)"
 
 } &>/dev/null && when_ok || when_err
 # в случае если отсутствует соединение с интернетом

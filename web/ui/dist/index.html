@@ -211,6 +211,39 @@
       </div>
 
       <div class="card">
+        <h2>Контроль связи</h2>
+        <p class="hint">
+          Роутер сам по себе не замечает, что сервер подписки перестал
+          работать: xray продолжает слушать свой порт, интерфейс поднят,
+          а сайты через туннель уже не открываются. Проверка выходит наружу
+          через рабочий туннель и, если ответа нет, перезапускает текущий
+          сервер. Не помогло — переключается на следующий по рейтингу
+          (только когда включено переключение на лучший автоматически).
+        </p>
+
+        <div class="switch" style="margin-bottom:12px">
+          <input type="checkbox" id="sub-live">
+          <label class="track" for="sub-live"></label>
+          <span>Проверять связь через туннель</span>
+        </div>
+
+        <div class="row">
+          <label class="meta" for="sub-live-every">Проверять каждые</label>
+          <select id="sub-live-every" style="width:auto">
+            <option value="2">2 минуты</option>
+            <option value="5">5 минут</option>
+            <option value="10">10 минут</option>
+            <option value="15">15 минут</option>
+            <option value="30">30 минут</option>
+            <option value="60">час</option>
+          </select>
+
+          <button class="btn" id="sub-save-live">Сохранить</button>
+          <span class="meta" id="sub-live-status"></span>
+        </div>
+      </div>
+
+      <div class="card">
         <h2>Проверка серверов</h2>
         <p class="hint">
           Проверка идёт в три этапа: отклик узла у всех серверов, затем

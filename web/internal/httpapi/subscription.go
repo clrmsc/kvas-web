@@ -12,20 +12,28 @@ import (
 // subscriptionView — состояние подписки в том виде, в каком его показывает
 // интерфейс. Полная ссылка наружу не отдаётся: в ней токен доступа.
 type subscriptionView struct {
-	OK         bool           `json:"ok"`
-	Configured bool           `json:"configured"`
-	URLMasked  string         `json:"url_masked"`
-	Enabled    bool           `json:"enabled"`
-	AutoApply  bool           `json:"auto_apply"`
-	CheckTime  string         `json:"check_time"`
-	SpeedTopN  int            `json:"speed_top_n"`
-	LastCheck  string         `json:"last_check,omitempty"`
-	NextCheck  string         `json:"next_check,omitempty"`
-	LastError  string         `json:"last_error,omitempty"`
-	ActiveKey  string         `json:"active_key,omitempty"`
-	ActiveName string         `json:"active_name,omitempty"`
-	AppliedAt  string         `json:"applied_at,omitempty"`
-	Results    []probe.Result `json:"results"`
+	OK         bool   `json:"ok"`
+	Configured bool   `json:"configured"`
+	URLMasked  string `json:"url_masked"`
+	Enabled    bool   `json:"enabled"`
+	AutoApply  bool   `json:"auto_apply"`
+	CheckTime  string `json:"check_time"`
+	SpeedTopN  int    `json:"speed_top_n"`
+	LiveCheck  bool   `json:"live_check"`
+	LiveEvery  int    `json:"live_every_minutes"`
+	// Итог последней проверки связи через туннель.
+	LiveAt      string         `json:"live_at,omitempty"`
+	LiveOK      bool           `json:"live_ok,omitempty"`
+	LiveMS      float64        `json:"live_ms,omitempty"`
+	LiveError   string         `json:"live_error,omitempty"`
+	LiveRepairs int            `json:"live_repairs,omitempty"`
+	LastCheck   string         `json:"last_check,omitempty"`
+	NextCheck   string         `json:"next_check,omitempty"`
+	LastError   string         `json:"last_error,omitempty"`
+	ActiveKey   string         `json:"active_key,omitempty"`
+	ActiveName  string         `json:"active_name,omitempty"`
+	AppliedAt   string         `json:"applied_at,omitempty"`
+	Results     []probe.Result `json:"results"`
 	// History — по дням для каждого сервера, ключ — адрес:порт.
 	History map[string][]autovpn.HistoryPoint `json:"history,omitempty"`
 }
@@ -33,24 +41,33 @@ type subscriptionView struct {
 func (s *Server) subscriptionView() subscriptionView {
 	st := s.autovpn.State()
 	v := subscriptionView{
-		OK:         true,
-		Configured: st.Configured(),
-		URLMasked:  autovpn.MaskURL(st.URL),
-		Enabled:    st.Enabled,
-		AutoApply:  st.AutoApply,
-		CheckTime:  st.CheckTime,
-		SpeedTopN:  st.SpeedTopN,
-		LastError:  st.LastError,
-		ActiveKey:  st.ActiveKey,
-		ActiveName: st.ActiveName,
-		Results:    st.Results,
-		History:    st.History,
+		OK:          true,
+		Configured:  st.Configured(),
+		URLMasked:   autovpn.MaskURL(st.URL),
+		Enabled:     st.Enabled,
+		AutoApply:   st.AutoApply,
+		CheckTime:   st.CheckTime,
+		SpeedTopN:   st.SpeedTopN,
+		LiveCheck:   st.LiveCheck,
+		LiveEvery:   st.LiveEvery,
+		LiveOK:      st.LiveOK,
+		LiveMS:      st.LiveMS,
+		LiveError:   st.LiveError,
+		LiveRepairs: st.LiveRepairs,
+		LastError:   st.LastError,
+		ActiveKey:   st.ActiveKey,
+		ActiveName:  st.ActiveName,
+		Results:     st.Results,
+		History:     st.History,
 	}
 	if v.Results == nil {
 		v.Results = []probe.Result{}
 	}
 	if !st.LastCheck.IsZero() {
 		v.LastCheck = st.LastCheck.Format("2006-01-02 15:04")
+	}
+	if !st.LiveAt.IsZero() {
+		v.LiveAt = st.LiveAt.Format("15:04")
 	}
 	if !st.AppliedAt.IsZero() {
 		v.AppliedAt = st.AppliedAt.Format("2006-01-02 15:04")
@@ -72,6 +89,8 @@ func (s *Server) handleSubscriptionSave(w http.ResponseWriter, r *http.Request) 
 		AutoApply *bool   `json:"auto_apply"`
 		CheckTime *string `json:"check_time"`
 		SpeedTopN *int    `json:"speed_top_n"`
+		LiveCheck *bool   `json:"live_check"`
+		LiveEvery *int    `json:"live_every_minutes"`
 	}
 	if !decodeJSON(w, r, &body) {
 		return
@@ -82,6 +101,8 @@ func (s *Server) handleSubscriptionSave(w http.ResponseWriter, r *http.Request) 
 		AutoApply: body.AutoApply,
 		CheckTime: body.CheckTime,
 		SpeedTopN: body.SpeedTopN,
+		LiveCheck: body.LiveCheck,
+		LiveEvery: body.LiveEvery,
 	}); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

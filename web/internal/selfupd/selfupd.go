@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
@@ -148,15 +149,30 @@ func NeedsUpdate(installed, latest string) bool {
 }
 
 // Download скачивает пакет во временный файл рядом с указанным каталогом.
+// cacheBustURL добавляет к ссылке метку версии: имя файла в релизе
+// постоянное, и раздача GitHub ещё несколько часов отдаёт по нему прежнюю
+// сборку. С меткой каждый выпуск запрашивается по своему адресу.
+func cacheBustURL(rel Release) string {
+	if rel.Version == "" {
+		return rel.URL
+	}
+	sep := "?"
+	if strings.Contains(rel.URL, "?") {
+		sep = "&"
+	}
+	return rel.URL + sep + "v=" + url.QueryEscape(rel.Version)
+}
+
 func Download(ctx context.Context, rel Release, dir string, progress func(done, total int64)) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rel.URL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cacheBustURL(rel), nil)
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("User-Agent", "kvas-web")
+	req.Header.Set("Cache-Control", "no-cache")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

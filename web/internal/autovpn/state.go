@@ -23,6 +23,14 @@ type State struct {
 	CheckTime string `json:"check_time"` // время суточной проверки, «ЧЧ:ММ»
 	SpeedTopN int    `json:"speed_top_n"`
 
+	// LiveCheck — следить ли за тем, что через туннель действительно ходит
+	// трафик. Проверка конфигурации и порта видит только свою сторону:
+	// когда сервер подписки умирает, xray продолжает слушать порт как ни
+	// в чём не бывало, а интернета к закрытым сайтам уже нет.
+	LiveCheck bool `json:"live_check"`
+	// LiveEvery — как часто выполнять такую проверку, в минутах.
+	LiveEvery int `json:"live_every_minutes"`
+
 	// History — итоги последних дней по каждому серверу: показывается
 	// столбиком в таблице, чтобы видеть, стабилен ли сервер.
 	History map[string][]HistoryPoint `json:"history,omitempty"`
@@ -33,6 +41,13 @@ type State struct {
 	ActiveKey  string         `json:"active_key"`  // адрес:порт применённого сервера
 	ActiveName string         `json:"active_name"` // его подпись из подписки
 	AppliedAt  time.Time      `json:"applied_at"`
+
+	// Итог последней проверки связи через туннель.
+	LiveAt      time.Time `json:"live_at,omitempty"`
+	LiveOK      bool      `json:"live_ok,omitempty"`
+	LiveMS      float64   `json:"live_ms,omitempty"`
+	LiveError   string    `json:"live_error,omitempty"`
+	LiveRepairs int       `json:"live_repairs,omitempty"` // сколько раз туннель чинился сам
 }
 
 // DefaultState — состояние до первой настройки.
@@ -42,6 +57,8 @@ func DefaultState() State {
 		AutoApply: true,
 		CheckTime: "04:30",
 		SpeedTopN: 5,
+		LiveCheck: true,
+		LiveEvery: 5,
 		Results:   []probe.Result{},
 	}
 }
@@ -60,6 +77,30 @@ func (s State) NextRun(after time.Time) time.Time {
 		next = next.AddDate(0, 0, 1)
 	}
 	return next
+}
+
+// LiveInterval возвращает период проверки связи с защитой от нулевого
+// значения в старых файлах состояния.
+func (s State) LiveInterval() time.Duration {
+	if s.LiveEvery < minLiveEvery || s.LiveEvery > maxLiveEvery {
+		return 5 * time.Minute
+	}
+	return time.Duration(s.LiveEvery) * time.Minute
+}
+
+// Пределы периода проверки: чаще раза в минуту смысла нет, реже суток —
+// это уже не наблюдение.
+const (
+	minLiveEvery = 1
+	maxLiveEvery = 1440
+)
+
+// ValidateLiveEvery проверяет период проверки связи.
+func ValidateLiveEvery(v int) error {
+	if v < minLiveEvery || v > maxLiveEvery {
+		return fmt.Errorf("проверять связь можно не чаще раза в минуту и не реже раза в сутки")
+	}
+	return nil
 }
 
 // ValidateCheckTime проверяет строку расписания.
@@ -104,6 +145,9 @@ func loadState(path string) (State, error) {
 	}
 	if st.SpeedTopN <= 0 {
 		st.SpeedTopN = 5
+	}
+	if st.LiveEvery <= 0 {
+		st.LiveEvery = 5
 	}
 	return st, nil
 }

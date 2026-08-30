@@ -32,6 +32,15 @@ type Manager struct {
 	// а на роутере это заметная нагрузка.
 	running   bool
 	runningMu sync.Mutex
+
+	// internetUp подменяется в тестах: настоящая проверка стучится
+	// к публичным DNS, а тестам выходить наружу незачем.
+	internetUp func(context.Context) bool
+
+	// liveSeen — была ли уже проверка связи с момента запуска. Первую
+	// отмечаем в журнале, даже если состояние не изменилось: так видно,
+	// что сторож работает.
+	liveSeen bool
 }
 
 // New загружает сохранённое состояние подписки.
@@ -78,6 +87,8 @@ type Settings struct {
 	AutoApply *bool
 	CheckTime *string
 	SpeedTopN *int
+	LiveCheck *bool
+	LiveEvery *int
 }
 
 // UpdateSettings применяет только переданные поля.
@@ -119,6 +130,15 @@ func (m *Manager) UpdateSettings(s Settings) (State, error) {
 			return m.state, fmt.Errorf("проверять по скорости можно от 1 до 20 серверов")
 		}
 		next.SpeedTopN = n
+	}
+	if s.LiveCheck != nil {
+		next.LiveCheck = *s.LiveCheck
+	}
+	if s.LiveEvery != nil {
+		if err := ValidateLiveEvery(*s.LiveEvery); err != nil {
+			return m.state, err
+		}
+		next.LiveEvery = *s.LiveEvery
 	}
 
 	if err := saveState(m.cfg.SubscriptionFile(), next); err != nil {
@@ -549,28 +569,6 @@ func (m *Manager) tunnelHealthy(ctx context.Context) bool {
 		return true
 	}
 	return st.Up()
-}
-
-// WatchTunnel периодически проверяет туннель и поднимает его при падении.
-// Первая проверка — сразу: сервис как раз перезапускают после обновления,
-// когда конфигурация туннеля могла и не пережить установку.
-func (m *Manager) WatchTunnel(ctx context.Context, every time.Duration) {
-	if _, err := m.EnsureTunnel(ctx); err != nil {
-		m.log.Error("не удалось восстановить туннель при запуске", "err", err)
-	}
-
-	ticker := time.NewTicker(every)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if _, err := m.EnsureTunnel(ctx); err != nil {
-				m.log.Error("не удалось восстановить туннель", "err", err)
-			}
-		}
-	}
 }
 
 // RestartTunnel перезапускает xray и поднимает прокси-интерфейс, проверяя,

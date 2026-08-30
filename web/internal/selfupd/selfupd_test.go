@@ -164,3 +164,20 @@ func buildIPK(t *testing.T, path, control string) {
 	tw.Close()
 	zw.Close()
 }
+
+// Ссылка на пакет должна отличаться от выпуска к выпуску: имя файла в
+// релизе постоянное, и раздача GitHub иначе отдаёт прежнюю сборку.
+func TestCacheBustURL(t *testing.T) {
+	rel := Release{Version: "1.1.9_beta-10-58", URL: "https://example.com/kvas-aarch64.ipk"}
+	got := cacheBustURL(rel)
+	if !strings.Contains(got, "v=1.1.9_beta-10-58") {
+		t.Errorf("метка версии не добавлена: %s", got)
+	}
+	if same := cacheBustURL(Release{URL: rel.URL}); same != rel.URL {
+		t.Errorf("без версии ссылку менять не нужно: %s", same)
+	}
+	withQuery := cacheBustURL(Release{Version: "1", URL: "https://example.com/a.ipk?x=1"})
+	if !strings.Contains(withQuery, "?x=1&v=1") {
+		t.Errorf("параметр приклеен неверно: %s", withQuery)
+	}
+}
