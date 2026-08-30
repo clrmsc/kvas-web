@@ -157,6 +157,10 @@ else
 	say "  ${RED}Веб-интерфейс не запустился${NOCL} — посмотрите /opt/var/log/kvas-web.log"
 fi
 say ""
+say "  3. Обновите клиент xray:  ${BLUE}Настройки → Клиент xray → Проверить обновление${NOCL}"
+say "     В репозитории Entware он отстаёт, и часть серверов подписки"
+say "     из-за этого не подключается."
+say ""
 say "  Управление веб-интерфейсом:  ${BLUE}kvas web {status|restart|off}${NOCL}"
 say "  Журнал:                      ${BLUE}/opt/var/log/kvas-web.log${NOCL}"
 printf "%78s\n" | tr " " "="

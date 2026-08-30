@@ -552,7 +552,13 @@ func (m *Manager) tunnelHealthy(ctx context.Context) bool {
 }
 
 // WatchTunnel периодически проверяет туннель и поднимает его при падении.
+// Первая проверка — сразу: сервис как раз перезапускают после обновления,
+// когда конфигурация туннеля могла и не пережить установку.
 func (m *Manager) WatchTunnel(ctx context.Context, every time.Duration) {
+	if _, err := m.EnsureTunnel(ctx); err != nil {
+		m.log.Error("не удалось восстановить туннель при запуске", "err", err)
+	}
+
 	ticker := time.NewTicker(every)
 	defer ticker.Stop()
 	for {
