@@ -210,9 +210,15 @@ button {
   padding: 9px 12px;
   background: var(--surface-2);
   border-radius: 8px;
+  /* Если места не хватает, история переносится на вторую строку, а не
+     уезжает за край вместе с кнопкой. */
+  flex-wrap: wrap;
 }
 
-.list .item .name { flex: 1; word-break: break-all; font-size: 14px; }
+/* min-width: 0 обязателен: без него flex-элемент не сжимается уже своего
+   содержимого, и длинная строка с адресом выталкивала историю и кнопку
+   за правый край карточки. */
+.list .item .name { flex: 1 1 auto; min-width: 0; word-break: break-word; font-size: 14px; }
 .list .item .meta { color: var(--muted); font-size: 12px; }
 
 .empty { color: var(--muted); font-size: 14px; padding: 14px 0; text-align: center; }
@@ -318,7 +324,12 @@ pre.log {
   width: 104px;
   display: flex;
   justify-content: flex-end;
+  margin-left: auto;
 }
+
+/* История прижата к колонке действий, а не растянута по строке. */
+.list .item .history { margin-left: auto; }
+.list .item .history + .action { margin-left: 0; }
 
 .history .day {
   min-width: 46px;
