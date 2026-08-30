@@ -311,6 +311,15 @@ pre.log {
   flex: 0 0 auto;
 }
 
+/* Кнопка «Применить» и метка «активен» разной ширины: без общей колонки
+   столбики истории съезжали бы от строки к строке. */
+.list .item .action {
+  flex: 0 0 auto;
+  width: 104px;
+  display: flex;
+  justify-content: flex-end;
+}
+
 .history .day {
   min-width: 46px;
   padding: 4px 5px;
@@ -337,4 +346,6 @@ pre.log {
   /* На телефоне история переносится под название сервера. */
   .list .item { flex-wrap: wrap; }
   .history { width: 100%; justify-content: flex-start; }
+  /* Фиксированная колонка нужна только там, где строки выстроены рядом. */
+  .list .item .action { width: auto; }
 }

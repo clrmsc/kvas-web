@@ -518,9 +518,9 @@ function renderSubResults(results) {
           <div class="meta">${esc(r.address)}:${r.port} — ${metrics}</div>
         </span>
         ${renderHistory(r.key)}
-        ${active
+        <span class="action">${active
           ? '<span class="badge"><span class="dot ok"></span>активен</span>'
-          : `<button class="btn small" data-apply="${esc(r.key)}"${r.error ? ' disabled' : ''}>Применить</button>`}
+          : `<button class="btn small" data-apply="${esc(r.key)}"${r.error ? ' disabled' : ''}>Применить</button>`}</span>
       </div>`;
   }).join('');
 }
@@ -529,9 +529,9 @@ function renderSubResults(results) {
 // туннель, снизу скорость. Дни без замеров показываются пустыми — по ним
 // видно, что сервер в тот день не отвечал.
 function renderHistory(key) {
+  // Даже когда замеров нет, столбики рисуются пустыми: иначе строка была бы
+  // уже остальных, и колонки в таблице разъезжались бы.
   const points = subState?.history?.[key] ?? [];
-  if (!points.length) return '<span class="history"></span>';
-
   const byDate = new Map(points.map((p) => [p.date, p]));
   const today = new Date();
   const days = [];

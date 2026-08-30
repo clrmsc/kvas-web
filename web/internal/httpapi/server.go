@@ -197,6 +197,10 @@ func (r *statusRecorder) Flush() {
 func (s *Server) staticHandler() http.Handler {
 	files := http.FileServer(http.FS(s.static))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Страница вшита в бинарник и меняется вместе с ним. Без запрета
+		// на кеширование после обновления пакета браузер продолжал бы
+		// показывать прежний интерфейс к новому API.
+		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "same-origin")
