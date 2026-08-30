@@ -417,24 +417,35 @@ loaders.tags = async () => {
     list.innerHTML = '<div class="empty">Заквасок нет</div>';
     return;
   }
+  // Каждая закваска раскрывается: видно, какие домены в неё входят и
+  // какие из них уже в защищённом списке.
   list.innerHTML = r.tags.map((t) => {
     const inList = t.domains.filter((d) => d.in_list).length;
+    const domains = t.domains
+      .map((d) => `<span class="domain${d.in_list ? ' on' : ''}">${esc(d.name)}</span>`)
+      .join('');
     return `
-      <div class="item">
-        <span class="name">${esc(t.name)}
-          <div class="meta">${inList} из ${t.domains.length} доменов в списке</div>
-        </span>
-        <button class="btn small ${t.enabled ? 'danger' : 'primary'}"
-                data-tag="${esc(t.name)}" data-action="${t.enabled ? 'disable' : 'enable'}">
-          ${t.enabled ? 'Выключить' : 'Включить'}
-        </button>
-      </div>`;
+      <details class="tag">
+        <summary class="item">
+          <span class="name">${esc(t.name)}
+            <div class="meta">${inList} из ${t.domains.length} доменов в списке</div>
+          </span>
+          <button class="btn small ${t.enabled ? 'danger' : 'primary'}"
+                  data-tag="${esc(t.name)}" data-action="${t.enabled ? 'disable' : 'enable'}">
+            ${t.enabled ? 'Выключить' : 'Включить'}
+          </button>
+        </summary>
+        <div class="tag-domains">${domains}</div>
+      </details>`;
   }).join('');
 };
 
 $('#tags-list').addEventListener('click', async (e) => {
   const { tag, action } = e.target.dataset ?? {};
   if (!tag) return;
+  // Кнопка лежит внутри summary: без этого нажатие заодно раскрывало бы
+  // или сворачивало закваску.
+  e.preventDefault();
   e.target.disabled = true;
   e.target.textContent = 'Применяем…';
   try {

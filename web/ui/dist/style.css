@@ -221,6 +221,36 @@ button {
 .list .item .name { flex: 1 1 auto; min-width: 0; word-break: break-word; font-size: 14px; }
 .list .item .meta { color: var(--muted); font-size: 12px; }
 
+/* ---------- Раскрывающаяся закваска ---------- */
+
+.list details.tag { display: grid; gap: 6px; }
+.list details.tag > summary { cursor: pointer; list-style: none; }
+.list details.tag > summary::-webkit-details-marker { display: none; }
+/* Треугольник рисуем сами: штатный маркер ломает раскладку строки. */
+.list details.tag > summary .name::before { content: '▸\00a0'; color: var(--muted); }
+.list details.tag[open] > summary .name::before { content: '▾\00a0'; }
+
+.tag-domains {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border-radius: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.tag-domains .domain {
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+/* Домены, уже попавшие в защищённый список. */
+.tag-domains .domain.on { color: var(--ok); border-color: var(--ok); }
+
 .empty { color: var(--muted); font-size: 14px; padding: 14px 0; text-align: center; }
 
 /* ---------- Журнал операций ---------- */
