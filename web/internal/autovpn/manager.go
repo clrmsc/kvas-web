@@ -504,6 +504,69 @@ func (m *Manager) restartXray(ctx context.Context) error {
 	return nil
 }
 
+// EnsureTunnel возвращает туннель к жизни, если он лежит: заново пишет
+// конфигурацию выбранного сервера и поднимает интерфейс.
+//
+// Понадобилось после `kvas upgrade`: он удаляет /opt/etc/xray вместе с
+// конфигурацией, и туннель молча остаётся выключенным. То же самое
+// случается после перезагрузки роутера, если что-то не поднялось.
+func (m *Manager) EnsureTunnel(ctx context.Context) (bool, error) {
+	st := m.State()
+	if st.ActiveKey == "" {
+		// Сервер ещё не выбирали — восстанавливать нечего.
+		return false, nil
+	}
+	if m.tunnelHealthy(ctx) {
+		return false, nil
+	}
+
+	m.log.Warn("туннель не работает, восстанавливаем", "сервер", st.ActiveName)
+	if err := m.Apply(ctx, st.ActiveKey); err != nil {
+		return false, err
+	}
+	m.log.Info("туннель восстановлен", "сервер", st.ActiveName)
+	return true, nil
+}
+
+// tunnelHealthy проверяет три вещи разом: есть ли конфигурация, слушает ли
+// xray свой порт и поднят ли прокси-интерфейс роутера.
+func (m *Manager) tunnelHealthy(ctx context.Context) bool {
+	if _, err := os.Stat(m.cfg.XrayConf); err != nil {
+		return false
+	}
+	if !kvas.PortListening(m.cfg.ProxyPort) {
+		return false
+	}
+
+	name, err := kvas.Conf{Path: m.cfg.KvasConf}.Get("INFACE_CLI")
+	if err != nil || strings.TrimSpace(name) == "" {
+		// Прокси-интерфейс не настроен — судим только по порту.
+		return true
+	}
+	st, err := keenetic.New(m.cfg.RCIAddr).Interface(ctx, strings.TrimSpace(name))
+	if err != nil {
+		// Роутер не ответил — не выдумываем поломку.
+		return true
+	}
+	return st.Up()
+}
+
+// WatchTunnel периодически проверяет туннель и поднимает его при падении.
+func (m *Manager) WatchTunnel(ctx context.Context, every time.Duration) {
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if _, err := m.EnsureTunnel(ctx); err != nil {
+				m.log.Error("не удалось восстановить туннель", "err", err)
+			}
+		}
+	}
+}
+
 // RestartTunnel перезапускает xray и поднимает прокси-интерфейс, проверяя,
 // что туннель действительно ожил. Используется после замены бинарника.
 func (m *Manager) RestartTunnel(ctx context.Context) error {

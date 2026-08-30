@@ -249,3 +249,26 @@ func TestKeepCurrentFallsBackToLatency(t *testing.T) {
 		t.Error("разница 30→5 мс стоит переключения")
 	}
 }
+
+func TestEnsureTunnelSkipsWhenNoServerChosen(t *testing.T) {
+	m, _ := newTestManager(t)
+
+	// Сервер ни разу не выбирался — восстанавливать нечего, и лезть в
+	// конфигурацию xray незачем.
+	restored, err := m.EnsureTunnel(t.Context())
+	if err != nil {
+		t.Fatalf("без активного сервера ошибок быть не должно: %v", err)
+	}
+	if restored {
+		t.Error("восстановление не должно запускаться без выбранного сервера")
+	}
+}
+
+func TestTunnelHealthyNeedsConfig(t *testing.T) {
+	m, _ := newTestManager(t)
+
+	// Конфигурации нет — именно это оставляет после себя `kvas upgrade`.
+	if m.tunnelHealthy(t.Context()) {
+		t.Error("без файла конфигурации туннель не может считаться рабочим")
+	}
+}

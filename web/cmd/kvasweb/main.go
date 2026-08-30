@@ -104,6 +104,10 @@ func run(args []string) error {
 	// Суточная проверка серверов подписки живёт столько же, сколько сервис.
 	go av.RunScheduler(ctx)
 
+	// Туннель поднимаем сам, если он лёг: `kvas upgrade` удаляет его
+	// конфигурацию, да и после перезагрузки роутера не всё встаёт.
+	go av.WatchTunnel(ctx, 5*time.Minute)
+
 	// Подсети возвращаем в таблицу регулярно: её пересоздаёт `kvas init`,
 	// а после перезагрузки роутера она и вовсе пуста.
 	go nets.KeepApplied(ctx, 10*time.Minute, func(n int, err error) {

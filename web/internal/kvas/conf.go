@@ -87,6 +87,11 @@ func (c Conf) Set(key, value string) error {
 // питания роутера файл останется либо старым, либо новым, но не обрезанным.
 func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
+	// Каталог может отсутствовать: `kvas upgrade` удаляет /opt/etc/xray
+	// вместе с конфигурацией туннеля.
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
 	tmp, err := os.CreateTemp(dir, ".kvasweb-*")
 	if err != nil {
 		return err
