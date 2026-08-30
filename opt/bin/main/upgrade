@@ -182,10 +182,41 @@ remove_nano(){
 #	Переменные используемые в обновлении пакета
 #--------------------------------------------------------------------------------------------------------------
 
-# Ссылка на репозиторий на GitHub для получения крайней версии пакета
-release_url=https://api.github.com/repos/qzeleza/kvas/releases
+# Ссылка на репозиторий на GitHub для получения крайней версии пакета.
+# Это форк, и обновляться нужно с его релизов: в репозитории оригинала
+# лежит более старая версия, и `kvas upgrade` откатывал бы установку.
+release_url=https://api.github.com/repos/clrmsc/kvas-web/releases
+
+# Пакеты собираются под каждую архитектуру отдельно (в отличие от
+# оригинала, где ipk общий), поэтому выбираем свой.
+get_package_arch() {
+	_arch=$(opkg print-architecture 2>/dev/null | awk '$2 != "all" && $2 != "noarch" {print $2}' | tail -1)
+	case "${_arch}" in
+		mipsel*)  echo mipsle  ;;
+		mips*)    echo mips    ;;
+		aarch64*) echo aarch64 ;;
+		armv7*|arm*) echo armv7 ;;
+		*) echo "" ;;
+	esac
+}
+
+# Версия сборки лежит в имени файла-метки (version-1.1.9_beta-10-50):
+# в именах самих пакетов её нет, они одинаковые от выпуска к выпуску.
+get_release_version() {
+	curl -sH "Accept: application/vnd.github.v3+json" ${release_url}/latest 2>/dev/null \
+		| sed -n 's/.*\"name\": \"version-\([^\"]*\)\".*/\1/p' | head -1
+}
+
+package_arch=$(get_package_arch)
+[ -z "${package_arch}" ] && {
+	echo "Не удалось определить архитектуру роутера для выбора пакета."
+	exit 1
+}
+
 # Получаем ссылку на крайний релиз пакета на GitHub
-package_url=$(curl -sH "Accept: application/vnd.github.v3+json" ${release_url}/latest | sed -n 's/.*browser_download_url\": "\(.*\)\"/\1/p;'| tr -d ' ' |  sed '/^$/d')
+package_url=$(curl -sH "Accept: application/vnd.github.v3+json" ${release_url}/latest \
+	| sed -n 's/.*browser_download_url\": "\(.*\)\"/\1/p;' | tr -d ' ' | sed '/^$/d' \
+	| grep "kvas-${package_arch}\.ipk$" | head -1)
 # Выделяем имя пакета из ссылки
 package_name=$(get_package_name "${package_url}")
 # путь к файлу конфигурации пакета Квас
@@ -250,8 +281,11 @@ if echo "${*}" | grep -qv 'force' ; then
 					| grep -E 'VERSION|RELEASE' \
 					| tr -d '\n' | tr '-' '_' \
 					| sed 's/^APP_VERSION=\(.*\)APP_RELEASE=\(.*\)/\1-\2\n/')
-		next_ver=$(echo "${package_name}" |  sed 's/kvas_\(.*\)_all.*/\1/')
-		if [ "${prev_ver}" = "${next_ver}" ] ; then
+		# Версию из kvas.conf собирают заменой дефисов на подчёркивания,
+		# поэтому обе строки приводим к одному виду перед сравнением.
+		next_ver=$(get_release_version | tr '-' '_')
+		[ -z "${next_ver}" ] && next_ver=$(echo "${prev_ver}" | tr '-' '_')
+		if [ "$(echo "${prev_ver}" | tr '-' '_')" = "${next_ver}" ] ; then
 			print_error "Квас все еще свеж, обновлений пока нет."
 			exit 1
 		fi
@@ -263,8 +297,9 @@ if echo "${*}" | grep -qv 'force' ; then
 fi
 
 #--------------------------------------------------------------------------------------------------------------
-# получаем из имени файла его номер версии
-version=$(echo "${package_name}" | sed 's/kvas_\(.*\)_all.*/\1/; s/-/ /g; s/_/-/' )
+# получаем номер версии из метки релиза
+version=$(get_release_version)
+[ -z "${version}" ] && version="${package_name}"
 
 # если в параметрах нет аргумента rollback, то выводим линию
 echo "${*}" | grep -q 'rollback' && CL_VER=${RED} || { 
