@@ -23,6 +23,10 @@ type State struct {
 	CheckTime string `json:"check_time"` // время суточной проверки, «ЧЧ:ММ»
 	SpeedTopN int    `json:"speed_top_n"`
 
+	// History — итоги последних дней по каждому серверу: показывается
+	// столбиком в таблице, чтобы видеть, стабилен ли сервер.
+	History map[string][]HistoryPoint `json:"history,omitempty"`
+
 	LastCheck  time.Time      `json:"last_check"`
 	LastError  string         `json:"last_error,omitempty"`
 	Results    []probe.Result `json:"results"`

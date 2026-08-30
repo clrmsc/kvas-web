@@ -26,6 +26,8 @@ type subscriptionView struct {
 	ActiveName string         `json:"active_name,omitempty"`
 	AppliedAt  string         `json:"applied_at,omitempty"`
 	Results    []probe.Result `json:"results"`
+	// History — по дням для каждого сервера, ключ — адрес:порт.
+	History map[string][]autovpn.HistoryPoint `json:"history,omitempty"`
 }
 
 func (s *Server) subscriptionView() subscriptionView {
@@ -42,6 +44,7 @@ func (s *Server) subscriptionView() subscriptionView {
 		ActiveKey:  st.ActiveKey,
 		ActiveName: st.ActiveName,
 		Results:    st.Results,
+		History:    st.History,
 	}
 	if v.Results == nil {
 		v.Results = []probe.Result{}

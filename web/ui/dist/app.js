@@ -517,12 +517,42 @@ function renderSubResults(results) {
         <span class="name">${esc(r.name)}
           <div class="meta">${esc(r.address)}:${r.port} — ${metrics}</div>
         </span>
+        ${renderHistory(r.key)}
         ${active
           ? '<span class="badge"><span class="dot ok"></span>активен</span>'
           : `<button class="btn small" data-apply="${esc(r.key)}"${r.error ? ' disabled' : ''}>Применить</button>`}
       </div>`;
   }).join('');
 }
+
+// renderHistory рисует последние дни столбиками: сверху задержка через
+// туннель, снизу скорость. Дни без замеров показываются пустыми — по ним
+// видно, что сервер в тот день не отвечал.
+function renderHistory(key) {
+  const points = subState?.history?.[key] ?? [];
+  if (!points.length) return '<span class="history"></span>';
+
+  const byDate = new Map(points.map((p) => [p.date, p]));
+  const today = new Date();
+  const days = [];
+
+  for (let back = HISTORY_DAYS - 1; back >= 0; back--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - back);
+    const iso = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const point = byDate.get(iso);
+    days.push(`
+      <div class="day${back === 0 ? ' today' : ''}${point ? '' : ' empty-day'}">
+        <div class="date">${pad(d.getDate())}.${pad(d.getMonth() + 1)}</div>
+        <div class="ping">${point?.tunnel_ms ? Math.round(point.tunnel_ms) : '—'}</div>
+        <div class="speed">${point?.speed_mbps ? point.speed_mbps.toFixed(0) : '—'}</div>
+      </div>`);
+  }
+  return `<span class="history" title="сверху задержка в мс, снизу скорость в Мбит/с">${days.join('')}</span>`;
+}
+
+const HISTORY_DAYS = 5;
+const pad = (n) => String(n).padStart(2, '0');
 
 // Ошибки от xray и сети бывают многострочными — в списке нужна одна строка.
 function shortError(text) {

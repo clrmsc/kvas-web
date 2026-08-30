@@ -224,6 +224,7 @@ func (m *Manager) runCheck(ctx context.Context, onResult func(probe.Result)) ([]
 
 	m.mu.Lock()
 	m.state.Results = results
+	m.state.History = updateHistory(m.state.History, results, time.Now())
 	m.state.LastCheck = time.Now()
 	m.state.LastError = ""
 	stateCopy := m.state

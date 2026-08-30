@@ -302,3 +302,39 @@ pre.log {
 .switch input:checked + .track { background: var(--ok); }
 .switch input:checked + .track::after { transform: translateX(18px); }
 .switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- История замеров по дням ---------- */
+
+.history {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.history .day {
+  min-width: 46px;
+  padding: 4px 5px;
+  border-radius: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  text-align: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+/* Сегодняшний замер выделяем: по нему принималось решение о переключении. */
+.history .day.today { border-color: var(--accent); }
+
+.history .day .date { color: var(--muted); font-size: 9px; letter-spacing: -0.02em; }
+.history .day .ping { color: var(--text); }
+.history .day .speed { color: var(--ok); font-weight: 600; }
+.history .day.empty-day { opacity: 0.45; }
+.history .day.empty-day .ping,
+.history .day.empty-day .speed { color: var(--muted); }
+
+@media (max-width: 640px) {
+  /* На телефоне история переносится под название сервера. */
+  .list .item { flex-wrap: wrap; }
+  .history { width: 100%; justify-content: flex-start; }
+}
