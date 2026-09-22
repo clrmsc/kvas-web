@@ -18,6 +18,7 @@ import (
 	"github.com/clrmsc/kvas-web/web/internal/auth"
 	"github.com/clrmsc/kvas-web/web/internal/autovpn"
 	"github.com/clrmsc/kvas-web/web/internal/config"
+	"github.com/clrmsc/kvas-web/web/internal/fulltunnel"
 	"github.com/clrmsc/kvas-web/web/internal/httpapi"
 	"github.com/clrmsc/kvas-web/web/internal/kvas"
 	"github.com/clrmsc/kvas-web/web/internal/networks"
@@ -88,10 +89,11 @@ func run(args []string) error {
 	}
 
 	nets := networks.New(cfg.NetworksFile())
+	full := fulltunnel.New(cfg.FullTunnelFile(), cfg.KvasConf)
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           httpapi.New(cfg, am, av, nets, logger, ui.FS()).Handler(),
+		Handler:           httpapi.New(cfg, am, av, nets, full, logger, ui.FS()).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		// Пишущий таймаут не ставим: импорт списков и обновление отдают
 		// прогресс потоком и могут идти минутами.
@@ -112,6 +114,12 @@ func run(args []string) error {
 
 	// Подсети возвращаем в таблицу регулярно: её пересоздаёт `kvas init`,
 	// а после перезагрузки роутера она и вовсе пуста.
+	// Режим «весь трафик через туннель» тоже держится правилом в таблице,
+	// которую пересоздаёт `kvas init`, — возвращаем его на место.
+	go full.KeepApplied(ctx, 10*time.Minute, func(err error) {
+		logger.Warn("режим полного туннеля не восстановлен", "err", err)
+	})
+
 	go nets.KeepApplied(ctx, 10*time.Minute, func(n int, err error) {
 		if err != nil {
 			logger.Warn("подсети не применены", "err", err)

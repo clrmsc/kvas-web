@@ -16,6 +16,7 @@ import (
 	"github.com/clrmsc/kvas-web/web/internal/auth"
 	"github.com/clrmsc/kvas-web/web/internal/autovpn"
 	"github.com/clrmsc/kvas-web/web/internal/config"
+	"github.com/clrmsc/kvas-web/web/internal/fulltunnel"
 	"github.com/clrmsc/kvas-web/web/internal/networks"
 )
 
@@ -86,11 +87,13 @@ func newTestServer(t *testing.T) (*httptest.Server, config.Config, string) {
 	}
 
 	nets := networks.New(cfg.NetworksFile())
+	full := fulltunnel.New(filepath.Join(dir, "fulltunnel"), cfg.KvasConf)
+	full.IptablesBin = fakeIptables(t, dir)
 	// На машине разработчика ipset нет, а без него подсети не применяются
 	// и обработчики отвечают ошибкой. Подменяем заглушкой, которая
 	// записывает вызовы.
 	nets.IpsetBin = fakeIpset(t, dir)
-	srv := httptest.NewServer(New(cfg, am, av, nets, log, static).Handler())
+	srv := httptest.NewServer(New(cfg, am, av, nets, full, log, static).Handler())
 	t.Cleanup(srv.Close)
 	return srv, cfg, calls
 }
@@ -313,7 +316,8 @@ func TestSetupRejectedFromInternet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := New(cfg, am, av, networks.New(filepath.Join(cfg.StateDir, "networks.list")), log,
+	h := New(cfg, am, av, networks.New(filepath.Join(cfg.StateDir, "networks.list")),
+		fulltunnel.New(filepath.Join(cfg.StateDir, "fulltunnel"), cfg.KvasConf), log,
 		fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("x")}}).Handler()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup",
@@ -343,7 +347,8 @@ func TestSetupAllowedFromLAN(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := New(cfg, am, av, networks.New(filepath.Join(cfg.StateDir, "networks.list")), log,
+	h := New(cfg, am, av, networks.New(filepath.Join(cfg.StateDir, "networks.list")),
+		fulltunnel.New(filepath.Join(cfg.StateDir, "fulltunnel"), cfg.KvasConf), log,
 		fstest.MapFS{"index.html": &fstest.MapFile{Data: []byte("x")}}).Handler()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup",
@@ -633,4 +638,94 @@ func TestNetworksDiscordAddsVoiceRange(t *testing.T) {
 	if !strings.Contains(msg, "уже добавлены") {
 		t.Errorf("о повторе сказано невнятно: %q", msg)
 	}
+}
+
+// Переключатель полного туннеля должен доходить до правил и обратно:
+// интерфейс показывает не только выбор, но и то, применилось ли оно.
+func TestFullTunnelToggle(t *testing.T) {
+	srv, cfg, _ := newTestServer(t)
+	client := login(t, srv)
+
+	var before struct {
+		Enabled bool   `json:"enabled"`
+		Applied bool   `json:"applied"`
+		Iface   string `json:"iface"`
+		Error   string `json:"error"`
+	}
+	getJSON(t, client, srv.URL+"/api/fulltunnel", &before)
+	if before.Enabled || before.Applied {
+		t.Errorf("режим не должен быть включён по умолчанию: %+v", before)
+	}
+	if before.Iface != "br0" {
+		t.Errorf("интерфейс сети не определён: %+v", before)
+	}
+
+	resp, err := client.Post(srv.URL+"/api/fulltunnel", "application/json",
+		strings.NewReader(`{"enabled":true}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("включение вернуло %d", resp.StatusCode)
+	}
+
+	var after struct {
+		Enabled bool `json:"enabled"`
+		Applied bool `json:"applied"`
+	}
+	getJSON(t, client, srv.URL+"/api/fulltunnel", &after)
+	if !after.Enabled || !after.Applied {
+		t.Errorf("режим включён, но не применился: %+v", after)
+	}
+	rules, err := os.ReadFile(filepath.Join(filepath.Dir(cfg.StateDir), "iptables-rules"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(rules), "-A PREROUTING -i br0 -j KVASWEB_FULL") {
+		t.Errorf("правило не добавлено:\n%s", rules)
+	}
+
+	resp, err = client.Post(srv.URL+"/api/fulltunnel", "application/json",
+		strings.NewReader(`{"enabled":false}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	getJSON(t, client, srv.URL+"/api/fulltunnel", &after)
+	if after.Enabled || after.Applied {
+		t.Errorf("режим не выключился: %+v", after)
+	}
+}
+
+// fakeIptables изображает iptables поверх файла с правилами.
+func fakeIptables(t *testing.T, dir string) string {
+	t.Helper()
+	rules := filepath.Join(dir, "iptables-rules")
+	if err := os.WriteFile(rules,
+		[]byte("-A PREROUTING -i br0 -m set --match-set KVAS_LIST dst -j KVAS_MARK\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(dir, "iptables")
+	script := `#!/bin/sh
+RULES=` + rules + `
+shift 2
+op=$1; shift
+chain=$1; shift
+case "$op" in
+	-S) grep -- "$chain" "$RULES" 2>/dev/null; exit 0 ;;
+	-N) grep -qx -- "-N $chain" "$RULES" 2>/dev/null && exit 1
+	    echo "-N $chain" >> "$RULES"; exit 0 ;;
+	-F) grep -v -- "-A $chain " "$RULES" > "$RULES.t" 2>/dev/null; mv "$RULES.t" "$RULES"; exit 0 ;;
+	-X) grep -vx -- "-N $chain" "$RULES" > "$RULES.t" 2>/dev/null; mv "$RULES.t" "$RULES"; exit 0 ;;
+	-A) echo "-A $chain $*" >> "$RULES"; exit 0 ;;
+	-C) grep -qx -- "-A $chain $*" "$RULES" 2>/dev/null && exit 0 || exit 1 ;;
+	-D) grep -vx -- "-A $chain $*" "$RULES" > "$RULES.t" 2>/dev/null; mv "$RULES.t" "$RULES"; exit 0 ;;
+esac
+exit 2
+`
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin
 }

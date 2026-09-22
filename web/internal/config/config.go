@@ -100,6 +100,9 @@ func (c Config) SubscriptionFile() string { return filepath.Join(c.StateDir, "su
 // NetworksFile — подсети, которые заворачиваются в туннель помимо доменов.
 func (c Config) NetworksFile() string { return filepath.Join(c.StateDir, "networks.list") }
 
+// FullTunnelFile — включён ли режим «весь трафик через туннель».
+func (c Config) FullTunnelFile() string { return filepath.Join(c.StateDir, "fulltunnel") }
+
 // SessionFile — файл, куда сохраняются активные сессии, чтобы перезапуск
 // сервиса не разлогинивал пользователя.
 func (c Config) SessionFile() string { return filepath.Join(c.StateDir, "sessions") }

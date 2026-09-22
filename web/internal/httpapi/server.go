@@ -12,6 +12,7 @@ import (
 	"github.com/clrmsc/kvas-web/web/internal/auth"
 	"github.com/clrmsc/kvas-web/web/internal/autovpn"
 	"github.com/clrmsc/kvas-web/web/internal/config"
+	"github.com/clrmsc/kvas-web/web/internal/fulltunnel"
 	"github.com/clrmsc/kvas-web/web/internal/kvas"
 	"github.com/clrmsc/kvas-web/web/internal/networks"
 )
@@ -20,31 +21,33 @@ const sessionCookie = "kvasweb_session"
 
 // Server связывает конфигурацию, менеджер сессий и клиент CLI.
 type Server struct {
-	cfg      config.Config
-	auth     *auth.Manager
-	kvas     *kvas.Client
-	autovpn  *autovpn.Manager
-	networks *networks.Store
-	log      *slog.Logger
-	static   fs.FS
-	secure   bool // отдавать ли cookie с флагом Secure (включён TLS)
+	cfg        config.Config
+	auth       *auth.Manager
+	kvas       *kvas.Client
+	autovpn    *autovpn.Manager
+	networks   *networks.Store
+	fulltunnel *fulltunnel.Store
+	log        *slog.Logger
+	static     fs.FS
+	secure     bool // отдавать ли cookie с флагом Secure (включён TLS)
 }
 
 // timeNow вынесен переменной, чтобы тесты могли зафиксировать время.
 var timeNow = time.Now
 
 // New собирает сервер. static — файловая система с собранным SPA.
-func New(cfg config.Config, am *auth.Manager, av *autovpn.Manager, nets *networks.Store,
+func New(cfg config.Config, am *auth.Manager, av *autovpn.Manager, nets *networks.Store, full *fulltunnel.Store,
 	log *slog.Logger, static fs.FS) *Server {
 	return &Server{
-		cfg:      cfg,
-		auth:     am,
-		kvas:     kvas.NewClient(cfg.KvasBin),
-		autovpn:  av,
-		networks: nets,
-		log:      log,
-		static:   static,
-		secure:   cfg.TLSCert != "" && cfg.TLSKey != "",
+		cfg:        cfg,
+		auth:       am,
+		kvas:       kvas.NewClient(cfg.KvasBin),
+		autovpn:    av,
+		networks:   nets,
+		fulltunnel: full,
+		log:        log,
+		static:     static,
+		secure:     cfg.TLSCert != "" && cfg.TLSKey != "",
 	}
 }
 
@@ -74,6 +77,8 @@ func (s *Server) Handler() http.Handler {
 	protected.HandleFunc("DELETE /api/networks/{net}", s.handleNetworkDel)
 	protected.HandleFunc("POST /api/networks/telegram", s.handleNetworksTelegram)
 	protected.HandleFunc("POST /api/networks/discord", s.handleNetworksDiscord)
+	protected.HandleFunc("GET /api/fulltunnel", s.handleFullTunnelStatus)
+	protected.HandleFunc("POST /api/fulltunnel", s.handleFullTunnelSet)
 
 	protected.HandleFunc("GET /api/tags", s.handleTagsList)
 	protected.HandleFunc("POST /api/tags/{tag}/enable", s.handleTagEnable)

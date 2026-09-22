@@ -691,10 +691,13 @@ $('#sub-results').addEventListener('click', async (e) => {
 const ROUTE_NAMES = { full: 'весь трафик', list: 'по списку', exclude: 'мимо туннеля' };
 
 loaders.routes = async () => {
-  const [routes, devices] = await Promise.all([
+  const [routes, devices, full] = await Promise.all([
     api('/api/routes'),
     api('/api/routes/devices'),
+    api('/api/fulltunnel'),
   ]);
+
+  renderFullTunnel(full);
 
   $('#devices').innerHTML = devices.devices
     .map((d) => `<option value="${esc(d.ip)}">${esc(d.name || d.ip)}</option>`).join('');
@@ -712,6 +715,43 @@ loaders.routes = async () => {
       <button class="btn small danger" data-route-type="${esc(r.type)}" data-route-ip="${esc(r.ip)}">Удалить</button>
     </div>`).join('');
 };
+
+// renderFullTunnel показывает не только выбор пользователя, но и то, стоит
+// ли правило на самом деле: они расходятся, если таблицы пересоздали.
+function renderFullTunnel(s) {
+  $('#full-tunnel').checked = s.enabled;
+  const state = $('#full-tunnel-state');
+  if (s.error) {
+    state.textContent = s.error;
+    return;
+  }
+  if (!s.enabled) {
+    state.textContent = 'Сейчас в туннель уходят только домены из списка';
+    return;
+  }
+  const excluded = s.excluded?.length
+    ? ` · мимо туннеля: ${s.excluded.join(', ')}`
+    : '';
+  state.textContent = s.applied
+    ? `Включено на ${s.iface}${excluded}`
+    : 'Включено, но правило не применилось — проверьте, настроен ли Квас';
+}
+
+$('#full-tunnel').addEventListener('change', async (e) => {
+  const box = e.target;
+  const enabled = box.checked;
+  box.disabled = true;
+  try {
+    const r = await api('/api/fulltunnel', { method: 'POST', body: { enabled } });
+    toast(r.msg);
+    renderFullTunnel(await api('/api/fulltunnel'));
+  } catch (err) {
+    box.checked = !enabled;
+    handle(err);
+  } finally {
+    box.disabled = false;
+  }
+});
 
 $('#route-add-form').addEventListener('submit', async (e) => {
   e.preventDefault();
