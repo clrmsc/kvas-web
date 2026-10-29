@@ -48,6 +48,13 @@ func XrayConfig(s Server, opt XrayOptions) ([]byte, error) {
 
 	stream := map[string]any{
 		"network": s.Network,
+		// Адрес сервера подписки резолвится в оба семейства, а IPv6 на
+		// домашнем роутере обычно не работает. Свежие сборки xray в такой
+		// ситуации выбирают IPv6 и молча ждут таймаута — туннель
+		// «поднят», но наружу не ходит. Явно оставляем IPv4.
+		"sockopt": map[string]any{
+			"domainStrategy": "UseIPv4",
+		},
 	}
 	switch s.Security {
 	case "reality":
