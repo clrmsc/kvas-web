@@ -77,6 +77,7 @@ func (s *Server) Handler() http.Handler {
 	protected.HandleFunc("DELETE /api/networks/{net}", s.handleNetworkDel)
 	protected.HandleFunc("POST /api/networks/telegram", s.handleNetworksTelegram)
 	protected.HandleFunc("POST /api/networks/discord", s.handleNetworksDiscord)
+	protected.HandleFunc("POST /api/subscription/sitecheck", s.handleSubscriptionSiteCheck)
 	protected.HandleFunc("GET /api/fulltunnel", s.handleFullTunnelStatus)
 	protected.HandleFunc("POST /api/fulltunnel", s.handleFullTunnelSet)
 

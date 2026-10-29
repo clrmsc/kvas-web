@@ -268,6 +268,23 @@
         </p>
         <div class="list" id="sub-results" style="margin-top:8px"></div>
       </div>
+
+      <div class="card">
+        <h2>Проверка сайта</h2>
+        <p class="hint">
+          Бывает, что туннель исправен, а отдельный сервис через него не
+          открывается: часть серверов не пускают, например, к Instagram.
+          Проверка прогоняет один адрес через все серверы подписки и
+          показывает, где он открывается. Занимает несколько минут.
+        </p>
+        <form class="row" id="site-check-form">
+          <input type="text" id="site-url" class="grow" placeholder="instagram.com"
+                 autocapitalize="none" autocorrect="off" spellcheck="false" required>
+          <button class="btn primary" type="submit">Проверить</button>
+          <span class="meta" id="site-progress"></span>
+        </form>
+        <div class="list" id="site-results" style="margin-top:8px"></div>
+      </div>
     </section>
 
     <!-- Устройства -->

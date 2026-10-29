@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -181,6 +182,56 @@ func (s *Server) handleSubscriptionCheck(w http.ResponseWriter, r *http.Request)
 		"results": st.Results,
 		"state":   s.subscriptionView(),
 	})
+}
+
+// handleSubscriptionSiteCheck отвечает на вопрос «через какие серверы
+// открывается этот адрес». Как и обычная проверка, отдаётся потоком:
+// каждый сервер поднимается отдельно, и это занимает минуты.
+func (s *Server) handleSubscriptionSiteCheck(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		URL string `json:"url"`
+	}
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	run, err := s.autovpn.StartSiteCheck(body.URL)
+	if err != nil {
+		code := http.StatusBadRequest
+		if errors.Is(err, autovpn.ErrCheckInProgress) {
+			code = http.StatusConflict
+		}
+		writeError(w, code, err.Error())
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	flusher, _ := w.(http.Flusher)
+
+	send := func(event string, payload any) {
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return
+		}
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data)
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+
+	send("start", map[string]string{"url": run.URL})
+	for res := range run.Events {
+		select {
+		case <-r.Context().Done():
+			s.log.Info("клиент отключился, проверка адреса продолжается в фоне")
+			return
+		default:
+		}
+		send("result", res)
+	}
+	send("done", map[string]any{"url": run.URL})
 }
 
 func (s *Server) handleSubscriptionApply(w http.ResponseWriter, r *http.Request) {

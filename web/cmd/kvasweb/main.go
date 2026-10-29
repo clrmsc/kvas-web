@@ -39,8 +39,20 @@ func main() {
 func run(args []string) error {
 	checkOnly := false
 	updateOnly := false
+	siteURL := ""
 	filtered := make([]string, 0, len(args))
-	for _, a := range args {
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		// Проверка одного адреса через серверы подписки: тот же код, что
+		// и в интерфейсе, но результат виден прямо в консоли роутера.
+		if a == "-site" || a == "--site" {
+			if i+1 >= len(args) {
+				return fmt.Errorf("после -site укажите адрес, например: -site instagram.com")
+			}
+			siteURL = args[i+1]
+			i++
+			continue
+		}
 		switch a {
 		case "-version", "--version":
 			fmt.Println("kvasweb", version)
@@ -65,7 +77,7 @@ func run(args []string) error {
 
 	// В диагностическом режиме журнал идёт только в файл: иначе его строки
 	// перемешиваются с таблицей результатов.
-	logger, closeLog, err := newLogger(cfg.LogFile, !checkOnly)
+	logger, closeLog, err := newLogger(cfg.LogFile, !checkOnly && siteURL == "")
 	if err != nil {
 		return err
 	}
@@ -81,6 +93,9 @@ func run(args []string) error {
 		return fmt.Errorf("не удалось подготовить подписку: %w", err)
 	}
 
+	if siteURL != "" {
+		return runSiteCheck(av, siteURL)
+	}
 	if checkOnly {
 		return runCheck(av)
 	}
@@ -199,6 +214,36 @@ func newLogger(path string, toStdout bool) (*slog.Logger, func(), error) {
 
 // runCheck выполняет одну проверку серверов подписки и печатает итог.
 // Автоприменение при этом работает так же, как по расписанию.
+// runSiteCheck печатает, через какие серверы подписки открывается адрес.
+func runSiteCheck(av *autovpn.Manager, target string) error {
+	if !av.State().Configured() {
+		return fmt.Errorf("подписка не настроена — задайте ссылку в веб-интерфейсе")
+	}
+
+	run, err := av.StartSiteCheck(target)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Проверяем %s через серверы подписки\n\n", run.URL)
+
+	active := av.State().ActiveKey
+	ok := 0
+	for res := range run.Events {
+		mark := " "
+		if res.Key == active {
+			mark = "*"
+		}
+		if res.OK {
+			ok++
+			fmt.Printf("%s %-34s открывается, %4.0f мс\n", mark, trim(res.Name, 34), res.Latency)
+			continue
+		}
+		fmt.Printf("%s %-34s %s\n", mark, trim(res.Name, 34), res.Error)
+	}
+	fmt.Printf("\nОткрывается через %d серверов. * — используемый сейчас\n", ok)
+	return nil
+}
+
 func runCheck(av *autovpn.Manager) error {
 	if !av.State().Configured() {
 		return fmt.Errorf("подписка не настроена — задайте ссылку в веб-интерфейсе")

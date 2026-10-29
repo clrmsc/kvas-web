@@ -619,6 +619,81 @@ $('#sub-save-schedule').addEventListener('click', async () => {
   } catch (err) { handle(err); }
 });
 
+// Проверка одного адреса через серверы подписки: показывает, через какие
+// из них сайт открывается, и позволяет сразу переключиться на рабочий.
+const siteSeen = new Map();
+
+$('#site-check-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const url = $('#site-url').value.trim();
+  if (!url) return;
+
+  const btn = $('#site-check-form').querySelector('button');
+  const progress = $('#site-progress');
+  siteSeen.clear();
+  renderSiteResults();
+
+  btn.disabled = true;
+  progress.textContent = 'Проверяем…';
+  try {
+    await stream('/api/subscription/sitecheck', {
+      body: { url },
+      onEvent: (event, data) => {
+        if (event === 'result') {
+          siteSeen.set(data.key, data);
+          const ok = [...siteSeen.values()].filter((r) => r.ok).length;
+          progress.textContent = `Проверено ${siteSeen.size}, открывается через ${ok}`;
+          renderSiteResults();
+        }
+        if (event === 'done') progress.textContent = `Готово: ${siteSeen.size} серверов`;
+        if (event === 'error') { progress.textContent = ''; toast(data.error, 'err'); }
+      },
+    });
+  } catch (err) { progress.textContent = ''; handle(err); }
+  finally { btn.disabled = false; }
+});
+
+function renderSiteResults() {
+  const list = $('#site-results');
+  const items = [...siteSeen.values()];
+  if (!items.length) { list.innerHTML = ''; return; }
+
+  // Сначала те, через которые сайт открывается, и самые быстрые.
+  items.sort((a, b) => (b.ok - a.ok) || (a.latency_ms - b.latency_ms));
+  list.innerHTML = items.map((r) => {
+    const active = r.key === subState?.active_key;
+    const status = r.ok
+      ? `<span style="color:var(--ok)">открывается · ${Math.round(r.latency_ms)} мс</span>`
+      : `<span style="color:var(--muted)">${esc(r.error || 'не открывается')}</span>`;
+    const action = active
+      ? '<span class="action meta">активен</span>'
+      : (r.ok
+        ? `<button class="btn small action" data-site-apply="${esc(r.key)}">Применить</button>`
+        : '<span class="action"></span>');
+    return `
+      <div class="item">
+        <span class="name">${esc(r.name)}
+          <div class="meta">${status}</div>
+        </span>
+        ${action}
+      </div>`;
+  }).join('');
+}
+
+$('#site-results').addEventListener('click', async (e) => {
+  const key = e.target.dataset?.siteApply;
+  if (!key) return;
+  e.target.disabled = true;
+  e.target.textContent = 'Переключаем…';
+  try {
+    const r = await api('/api/subscription/apply', { method: 'POST', body: { key } });
+    subState = r.state;
+    toast(r.msg);
+    renderSubscription();
+    renderSiteResults();
+  } catch (err) { handle(err); await loaders.subscription(); }
+});
+
 $('#sub-save-live').addEventListener('click', async () => {
   try {
     subState = await api('/api/subscription', {

@@ -1,6 +1,7 @@
 package autovpn
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -270,5 +271,32 @@ func TestTunnelHealthyNeedsConfig(t *testing.T) {
 	// Конфигурации нет — именно это оставляет после себя `kvas upgrade`.
 	if m.tunnelHealthy(t.Context()) {
 		t.Error("без файла конфигурации туннель не может считаться рабочим")
+	}
+}
+
+// Проверка адреса не должна запускаться с мусором вместо адреса и не
+// должна лезть в сеть, пока идёт обычная проверка подписки.
+func TestStartSiteCheckValidatesAndLocks(t *testing.T) {
+	m, _ := newTestManager(t)
+
+	if _, err := m.StartSiteCheck("не адрес"); err == nil {
+		t.Error("мусор принят как адрес")
+	}
+
+	run, err := m.StartSiteCheck("instagram.com")
+	if err != nil {
+		t.Fatalf("проверка не запустилась: %v", err)
+	}
+	if run.URL != "https://instagram.com/" {
+		t.Errorf("адрес приведён к %q", run.URL)
+	}
+	if _, err := m.StartSiteCheck("example.com"); !errors.Is(err, ErrCheckInProgress) {
+		t.Errorf("вторая проверка запустилась: %v", err)
+	}
+	// Дожидаемся конца, иначе горутина переживёт тест.
+	for range run.Events {
+	}
+	if m.Running() {
+		t.Error("признак занятости не снят")
 	}
 }
